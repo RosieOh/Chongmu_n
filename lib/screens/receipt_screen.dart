@@ -245,15 +245,26 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
                   ],
                   RepaintBoundary(
                     key: _receiptKey,
-                    child: Container(
-                      color: AppColors.background,
-                      padding: const EdgeInsets.all(12),
-                      child: _ReceiptPaper(
-                        settlement: widget.settlement,
-                        results: _results,
-                        date: _now,
-                        accountLine: _accountLine(),
-                        showWatermark: !isPro,
+                    // 영수증은 다크 모드에서도 항상 밝은 종이 (저장 이미지 통일)
+                    child: Theme(
+                      data: AppTheme.light,
+                      child: DefaultTextStyle.merge(
+                        style: TextStyle(color: AppPalette.light.text),
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: AppPalette.light.background,
+                            borderRadius:
+                                BorderRadius.circular(AppDecor.radius),
+                          ),
+                          padding: const EdgeInsets.all(12),
+                          child: _ReceiptPaper(
+                            settlement: widget.settlement,
+                            results: _results,
+                            date: _now,
+                            accountLine: _accountLine(),
+                            showWatermark: !isPro,
+                          ),
+                        ),
                       ),
                     ),
                   ),
@@ -280,7 +291,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
     final progress = _results.isEmpty ? 0.0 : paid.length / _results.length;
 
     return Container(
-      decoration: AppDecor.card,
+      decoration: AppDecor.card(context),
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -290,12 +301,12 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
               const Icon(Icons.fact_check_rounded,
                   color: AppColors.primary, size: 20),
               const SizedBox(width: 8),
-              const Text(
+              Text(
                 '입금 확인',
                 style: TextStyle(
                   fontSize: 15,
                   fontWeight: FontWeight.w800,
-                  color: AppColors.darkText,
+                  color: context.colors.text,
                 ),
               ),
               const Spacer(),
@@ -315,7 +326,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
             style: TextStyle(
               fontSize: 12,
               fontWeight: allPaid ? FontWeight.w700 : FontWeight.w500,
-              color: allPaid ? AppColors.primary : AppColors.subText,
+              color: allPaid ? AppColors.primary : context.colors.subText,
             ),
           ),
           const SizedBox(height: 12),
@@ -328,7 +339,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
               builder: (context, v, _) => LinearProgressIndicator(
                 value: v,
                 minHeight: 8,
-                backgroundColor: AppColors.background,
+                backgroundColor: context.colors.background,
                 color: AppColors.primary,
               ),
             ),
@@ -336,19 +347,21 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
           const SizedBox(height: 10),
           Row(
             children: [
-              const Text('받은 금액 ',
-                  style: TextStyle(fontSize: 12, color: AppColors.subText)),
+              Text('받은 금액 ',
+                  style:
+                      TextStyle(fontSize: 12, color: context.colors.subText)),
               Text(
                 Fmt.won(received),
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w800,
-                  color: AppColors.darkText,
+                  color: context.colors.text,
                 ),
               ),
               const Spacer(),
-              const Text('남은 금액 ',
-                  style: TextStyle(fontSize: 12, color: AppColors.subText)),
+              Text('남은 금액 ',
+                  style:
+                      TextStyle(fontSize: 12, color: context.colors.subText)),
               Text(
                 Fmt.won(remain),
                 style: TextStyle(
@@ -389,7 +402,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
 
   Widget _buildAccountCard() {
     return Container(
-      decoration: AppDecor.card,
+      decoration: AppDecor.card(context),
       padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -399,19 +412,19 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
               const Icon(Icons.account_balance_rounded,
                   color: AppColors.primary, size: 20),
               const SizedBox(width: 8),
-              const Text(
+              Text(
                 '내 입금 계좌',
                 style: TextStyle(
                   fontSize: 15,
                   fontWeight: FontWeight.w800,
-                  color: AppColors.darkText,
+                  color: context.colors.text,
                 ),
               ),
               const Spacer(),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
-                  color: AppColors.primaryLight,
+                  color: context.colors.primaryLight,
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: const Text(
@@ -434,7 +447,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
                   controller: _bankCtrl,
                   focusNode: _bankFocus,
                   textInputAction: TextInputAction.next,
-                  decoration: AppDecor.boxInput('은행 (예: 카카오뱅크)'),
+                  decoration: AppDecor.boxInput(context, '은행 (예: 카카오뱅크)'),
                   onChanged: (v) {
                     AppStorage.setBankName(v.trim());
                     setState(() {});
@@ -447,7 +460,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
                 child: TextField(
                   controller: _holderCtrl,
                   textInputAction: TextInputAction.next,
-                  decoration: AppDecor.boxInput('예금주'),
+                  decoration: AppDecor.boxInput(context, '예금주'),
                   onChanged: (v) {
                     AppStorage.setAccountHolder(v.trim());
                     setState(() {});
@@ -462,16 +475,16 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
             focusNode: _accountFocus,
             keyboardType: TextInputType.text,
             textInputAction: TextInputAction.done,
-            decoration: AppDecor.boxInput('계좌번호 (예: 3333-01-1234567)'),
+            decoration: AppDecor.boxInput(context, '계좌번호 (예: 3333-01-1234567)'),
             onChanged: (v) {
               AppStorage.setAccountNumber(v.trim());
               setState(() {});
             },
           ),
           const SizedBox(height: 8),
-          const Text(
+          Text(
             '입력한 계좌는 이 휴대폰에만 저장되고, 영수증과 카톡 텍스트에 함께 표시돼요.',
-            style: TextStyle(fontSize: 12, color: AppColors.subText),
+            style: TextStyle(fontSize: 12, color: context.colors.subText),
           ),
         ],
       ),
@@ -481,7 +494,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
   Widget _buildBottomBar(bool isPro) {
     return Container(
       decoration: BoxDecoration(
-        color: AppColors.cardBg,
+        color: context.colors.card,
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.06),
@@ -603,9 +616,9 @@ class _PaidRow extends StatelessWidget {
                 height: 26,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: paid ? AppColors.primary : AppColors.cardBg,
+                  color: paid ? AppColors.primary : context.colors.card,
                   border: Border.all(
-                    color: paid ? AppColors.primary : AppColors.hint,
+                    color: paid ? AppColors.primary : context.colors.hint,
                     width: 1.5,
                   ),
                 ),
@@ -621,7 +634,7 @@ class _PaidRow extends StatelessWidget {
                   style: TextStyle(
                     fontSize: 15,
                     fontWeight: FontWeight.w700,
-                    color: paid ? AppColors.subText : AppColors.darkText,
+                    color: paid ? context.colors.subText : context.colors.text,
                   ),
                 ),
               ),
@@ -634,9 +647,9 @@ class _PaidRow extends StatelessWidget {
                 style: TextStyle(
                   fontSize: 15,
                   fontWeight: FontWeight.w800,
-                  color: paid ? AppColors.subText : AppColors.darkText,
+                  color: paid ? context.colors.subText : context.colors.text,
                   decoration: paid ? TextDecoration.lineThrough : null,
-                  decorationColor: AppColors.subText,
+                  decorationColor: context.colors.subText,
                 ),
               ),
             ],
@@ -656,7 +669,7 @@ class _PaidTag extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
-        color: AppColors.primaryLight,
+        color: context.colors.primaryLight,
         borderRadius: BorderRadius.circular(6),
       ),
       child: const Text(
@@ -680,7 +693,7 @@ class _AccountNudge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: AppColors.primaryLight,
+      color: context.colors.primaryLight,
       borderRadius: BorderRadius.circular(12),
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
@@ -740,23 +753,26 @@ class _ReceiptPaper extends StatelessWidget {
 
   static const _num = [ui.FontFeature.tabularFigures()];
 
-  static const _sub = TextStyle(fontSize: 12, color: AppColors.subText);
-  static const _body = TextStyle(
+  /// 영수증 종이는 다크 모드에서도 항상 밝은 종이색 (공유 이미지 통일)
+  static final AppPalette _paper = AppPalette.light;
+
+  static final _sub = TextStyle(fontSize: 12, color: _paper.subText);
+  static final _body = TextStyle(
     fontSize: 14,
     fontWeight: FontWeight.w600,
-    color: AppColors.darkText,
+    color: _paper.text,
     fontFeatures: _num,
   );
-  static const _bold = TextStyle(
+  static final _bold = TextStyle(
     fontSize: 15,
     fontWeight: FontWeight.w800,
-    color: AppColors.darkText,
+    color: _paper.text,
     fontFeatures: _num,
   );
-  static const _section = TextStyle(
+  static final _section = TextStyle(
     fontSize: 13,
     fontWeight: FontWeight.w800,
-    color: AppColors.subText,
+    color: _paper.subText,
     letterSpacing: 0.5,
   );
 
@@ -770,7 +786,7 @@ class _ReceiptPaper extends StatelessWidget {
     return ClipPath(
       clipper: _ZigzagClipper(),
       child: Container(
-        color: AppColors.cardBg,
+        color: context.colors.card,
         padding: const EdgeInsets.fromLTRB(20, 24, 20, 30),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -790,10 +806,10 @@ class _ReceiptPaper extends StatelessWidget {
             Text(
               title,
               textAlign: TextAlign.center,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 20,
                 fontWeight: FontWeight.w900,
-                color: AppColors.darkText,
+                color: context.colors.text,
               ),
             ),
             const SizedBox(height: 4),
@@ -807,14 +823,14 @@ class _ReceiptPaper extends StatelessWidget {
             // ── 총 지출액 ──
             Row(
               children: [
-                const Text('총 지출액', style: _bold),
+                Text('총 지출액', style: _bold),
                 const Spacer(),
                 Text(
                   Fmt.won(s.totalSpent),
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 22,
                     fontWeight: FontWeight.w900,
-                    color: AppColors.darkText,
+                    color: context.colors.text,
                     fontFeatures: _num,
                   ),
                 ),
@@ -823,14 +839,14 @@ class _ReceiptPaper extends StatelessWidget {
             const SizedBox(height: 14),
 
             // ── 차수별 상세 ──
-            const Text('차수별 내역', style: _section),
+            Text('차수별 내역', style: _section),
             const SizedBox(height: 8),
             for (var i = 0; i < s.rounds.length; i++)
               if (s.rounds[i].amount > 0) _roundRow(i),
             const _DashedLine(),
 
             // ── 인원별 입금액 ──
-            const Text('인원별 입금액', style: _section),
+            Text('인원별 입금액', style: _section),
             const SizedBox(height: 8),
             for (final p in results) _personRow(p),
             const _DashedLine(),
@@ -841,7 +857,7 @@ class _ReceiptPaper extends StatelessWidget {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               decoration: BoxDecoration(
-                color: AppColors.primaryLight,
+                color: context.colors.primaryLight,
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Row(
@@ -880,7 +896,7 @@ class _ReceiptPaper extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  border: Border.all(color: AppColors.border),
+                  border: Border.all(color: context.colors.border),
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Row(
@@ -902,7 +918,7 @@ class _ReceiptPaper extends StatelessWidget {
             // ── 로고 워터마크 (PRO 구매 시 제거) ──
             if (showWatermark) ...[
               const SizedBox(height: 20),
-              const Row(
+              Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   AppLogo(size: 18),
@@ -912,7 +928,7 @@ class _ReceiptPaper extends StatelessWidget {
                     style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w600,
-                      color: AppColors.hint,
+                      color: context.colors.hint,
                     ),
                   ),
                 ],
@@ -1008,7 +1024,8 @@ class _DashedLine extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: List.generate(
               count,
-              (_) => Container(width: 4, height: 1.2, color: AppColors.hint),
+              (_) =>
+                  Container(width: 4, height: 1.2, color: context.colors.hint),
             ),
           );
         },

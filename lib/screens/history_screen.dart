@@ -131,11 +131,11 @@ class _HistoryScreenState extends State<HistoryScreen> {
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 4, 16, 32),
       children: [
-        const Padding(
+        Padding(
           padding: EdgeInsets.only(left: 4, bottom: 4),
           child: Text(
             '눌러서 불러오고, 왼쪽으로 밀어서 삭제해요',
-            style: TextStyle(fontSize: 12, color: AppColors.subText),
+            style: TextStyle(fontSize: 12, color: context.colors.subText),
           ),
         ),
         ...children,
@@ -165,19 +165,19 @@ class _MonthHeader extends StatelessWidget {
         children: [
           Text(
             month,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 15,
               fontWeight: FontWeight.w800,
-              color: AppColors.darkText,
+              color: context.colors.text,
             ),
           ),
           const Spacer(),
           Text(
             '총 ${Fmt.won(total)}',
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 13,
               fontWeight: FontWeight.w600,
-              color: AppColors.subText,
+              color: context.colors.subText,
             ),
           ),
         ],
@@ -210,10 +210,10 @@ class _HistoryCard extends StatelessWidget {
 
     return Container(
       decoration: isCurrent
-          ? AppDecor.card.copyWith(
+          ? AppDecor.card(context).copyWith(
               border: Border.all(color: AppColors.primary, width: 1.5),
             )
-          : AppDecor.card,
+          : AppDecor.card(context),
       child: Material(
         color: Colors.transparent,
         borderRadius: BorderRadius.circular(AppDecor.radius),
@@ -229,7 +229,7 @@ class _HistoryCard extends StatelessWidget {
                   width: 50,
                   padding: const EdgeInsets.symmetric(vertical: 8),
                   decoration: BoxDecoration(
-                    color: AppColors.primaryLight,
+                    color: context.colors.primaryLight,
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: Column(
@@ -267,10 +267,10 @@ class _HistoryCard extends StatelessWidget {
                               _titleOf(s),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 15,
                                 fontWeight: FontWeight.w800,
-                                color: AppColors.darkText,
+                                color: context.colors.text,
                               ),
                             ),
                           ),
@@ -291,9 +291,9 @@ class _HistoryCard extends StatelessWidget {
                             : '${results.length}명 · $places',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 12,
-                          color: AppColors.subText,
+                          color: context.colors.subText,
                         ),
                       ),
                     ],
@@ -306,14 +306,14 @@ class _HistoryCard extends StatelessWidget {
                   children: [
                     Text(
                       Fmt.won(s.totalSpent),
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 15,
                         fontWeight: FontWeight.w900,
-                        color: AppColors.darkText,
+                        color: context.colors.text,
                       ),
                     ),
                     const SizedBox(height: 4),
-                    _paidTag(paid, results.length),
+                    _paidTag(context, paid, results.length),
                   ],
                 ),
               ],
@@ -324,7 +324,7 @@ class _HistoryCard extends StatelessWidget {
     );
   }
 
-  Widget _paidTag(int paid, int total) {
+  Widget _paidTag(BuildContext context, int paid, int total) {
     if (total > 0 && paid == total) {
       return const _Tag(
           text: '✓ 정산 완료', color: AppColors.primary, filled: true);
@@ -332,7 +332,7 @@ class _HistoryCard extends StatelessWidget {
     if (paid > 0) {
       return _Tag(text: '입금 $paid/$total', color: AppColors.primary);
     }
-    return const _Tag(text: '입금 대기', color: AppColors.subText);
+    return _Tag(text: '입금 대기', color: context.colors.subText);
   }
 }
 
@@ -378,7 +378,7 @@ class _EmptyHistory extends StatelessWidget {
               width: 72,
               height: 72,
               decoration: BoxDecoration(
-                color: AppColors.primaryLight,
+                color: context.colors.primaryLight,
                 shape: BoxShape.circle,
               ),
               child: const Icon(
@@ -388,19 +388,19 @@ class _EmptyHistory extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 16),
-            const Text(
+            Text(
               '아직 정산 기록이 없어요',
               style: TextStyle(
                 fontSize: 17,
                 fontWeight: FontWeight.w800,
-                color: AppColors.darkText,
+                color: context.colors.text,
               ),
             ),
             const SizedBox(height: 6),
-            const Text(
+            Text(
               '정산 금액을 입력하면 자동으로 여기에 저장돼요',
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 13, color: AppColors.subText),
+              style: TextStyle(fontSize: 13, color: context.colors.subText),
             ),
           ],
         ),

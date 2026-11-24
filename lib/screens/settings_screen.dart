@@ -9,6 +9,33 @@ import '../theme/app_theme.dart';
 enum SettingsAction { newSettlement, loadSample }
 
 // ═════════════════════════════════════════════
+// 화면 모드 (시스템 설정 / 라이트 / 다크)
+// ═════════════════════════════════════════════
+
+class ThemeModeController {
+  ThemeModeController._();
+
+  static final ThemeModeController instance = ThemeModeController._();
+
+  /// 앱 전체가 구독하는 현재 화면 모드
+  final ValueNotifier<ThemeMode> mode =
+      ValueNotifier<ThemeMode>(ThemeMode.system);
+
+  void load() {
+    mode.value = switch (AppStorage.themeMode) {
+      'light' => ThemeMode.light,
+      'dark' => ThemeMode.dark,
+      _ => ThemeMode.system,
+    };
+  }
+
+  Future<void> set(ThemeMode value) async {
+    mode.value = value;
+    await AppStorage.setThemeMode(value.name); // system / light / dark
+  }
+}
+
+// ═════════════════════════════════════════════
 // PRO 상태 관리 (추후 RevenueCat 연동 지점)
 // ═════════════════════════════════════════════
 
@@ -112,7 +139,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.cardBg,
+        backgroundColor: context.colors.card,
         surfaceTintColor: Colors.transparent,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
         title: const Text(
@@ -125,7 +152,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('취소', style: TextStyle(color: AppColors.subText)),
+            child: Text('취소', style: TextStyle(color: context.colors.subText)),
           ),
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(true),
@@ -172,15 +199,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
               ),
               const SizedBox(height: 6),
-              const Text(
+              Text(
                 '휴대폰을 바꾸거나 앱을 다시 설치했다면 눌러주세요',
                 textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 12, color: AppColors.subText),
+                style: TextStyle(fontSize: 12, color: context.colors.subText),
               ),
+              const SizedBox(height: 28),
+              const _SectionTitle('화면 모드'),
+              const _ThemeModeSelector(),
               const SizedBox(height: 28),
               const _SectionTitle('정산 관리'),
               Container(
-                decoration: AppDecor.card,
+                decoration: AppDecor.card(context),
                 child: Column(
                   children: [
                     _Tile(
@@ -205,15 +235,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
               const SizedBox(height: 28),
               const _SectionTitle('앱 정보'),
               Container(
-                decoration: AppDecor.card,
-                child: const Column(
+                decoration: AppDecor.card(context),
+                child: Column(
                   children: [
                     _Tile(
                       icon: Icons.info_outline_rounded,
                       title: '버전',
                       trailing: Text(
                         '1.0.0',
-                        style: TextStyle(color: AppColors.subText),
+                        style: TextStyle(color: context.colors.subText),
                       ),
                     ),
                     Divider(indent: 56),
@@ -229,7 +259,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 const SizedBox(height: 28),
                 const _SectionTitle('개발자 테스트 (디버그 빌드에서만 보여요)'),
                 Container(
-                  decoration: AppDecor.card,
+                  decoration: AppDecor.card(context),
                   padding: const EdgeInsets.fromLTRB(16, 6, 8, 6),
                   child: Row(
                     children: [
@@ -282,7 +312,7 @@ class _ProCard extends StatelessWidget {
           end: Alignment.bottomRight,
           colors: [
             AppColors.primary,
-            Color.lerp(AppColors.primary, AppColors.darkText, 0.35)!,
+            Color.lerp(AppColors.primary, AppColors.charcoal, 0.35)!,
           ],
         ),
         boxShadow: [
@@ -414,10 +444,10 @@ class _SectionTitle extends StatelessWidget {
       padding: const EdgeInsets.only(left: 4, bottom: 8),
       child: Text(
         text,
-        style: const TextStyle(
+        style: TextStyle(
           fontSize: 13,
           fontWeight: FontWeight.w800,
-          color: AppColors.subText,
+          color: context.colors.subText,
         ),
       ),
     );
@@ -448,22 +478,112 @@ class _Tile extends StatelessWidget {
       leading: Icon(icon, color: AppColors.primary),
       title: Text(
         title,
-        style: const TextStyle(
+        style: TextStyle(
           fontSize: 15,
           fontWeight: FontWeight.w700,
-          color: AppColors.darkText,
+          color: context.colors.text,
         ),
       ),
       subtitle: subtitle == null
           ? null
           : Text(
               subtitle!,
-              style: const TextStyle(fontSize: 12, color: AppColors.subText),
+              style: TextStyle(fontSize: 12, color: context.colors.subText),
             ),
       trailing: trailing ??
           (onTap == null
               ? null
-              : const Icon(Icons.chevron_right_rounded, color: AppColors.hint)),
+              : Icon(Icons.chevron_right_rounded, color: context.colors.hint)),
+    );
+  }
+}
+
+/// 시스템 설정 / 라이트 / 다크 선택 (세그먼트 버튼 스타일)
+class _ThemeModeSelector extends StatelessWidget {
+  const _ThemeModeSelector();
+
+  static const _options = [
+    (ThemeMode.system, Icons.brightness_auto_rounded, '시스템 설정'),
+    (ThemeMode.light, Icons.light_mode_rounded, '라이트'),
+    (ThemeMode.dark, Icons.dark_mode_rounded, '다크'),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final controller = ThemeModeController.instance;
+    return ValueListenableBuilder<ThemeMode>(
+      valueListenable: controller.mode,
+      builder: (context, current, _) {
+        return Container(
+          decoration: AppDecor.card(context),
+          padding: const EdgeInsets.all(6),
+          child: Row(
+            children: [
+              for (final (mode, icon, label) in _options)
+                Expanded(
+                  child: _ModeButton(
+                    icon: icon,
+                    label: label,
+                    selected: current == mode,
+                    onTap: () {
+                      HapticFeedback.lightImpact();
+                      controller.set(mode);
+                    },
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _ModeButton extends StatelessWidget {
+  const _ModeButton({
+    required this.icon,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final fg = selected ? AppColors.primary : context.colors.subText;
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: '화면 모드 $label',
+      child: GestureDetector(
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          decoration: BoxDecoration(
+            color: selected ? context.colors.primaryLight : Colors.transparent,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Column(
+            children: [
+              Icon(icon, size: 22, color: fg),
+              const SizedBox(height: 4),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
+                  color: fg,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

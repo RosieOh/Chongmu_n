@@ -401,6 +401,7 @@ class AppStorage {
   static const _kIsPro = 'is_pro';
   static const _kOnboarded = 'onboarding_done';
   static const _kHistory = 'history_v1';
+  static const _kThemeMode = 'theme_mode';
 
   /// 기록은 최근 100건까지만 보관 (기기 저장 공간 보호)
   static const int historyLimit = 100;
@@ -516,4 +517,9 @@ class AppStorage {
   /// 첫 실행 안내 카드를 닫았는지
   static bool get onboardingDone => _prefs.getBool(_kOnboarded) ?? false;
   static Future<void> setOnboardingDone() => _prefs.setBool(_kOnboarded, true);
+
+  /// 화면 모드: 'system' / 'light' / 'dark'
+  static String get themeMode => _prefs.getString(_kThemeMode) ?? 'system';
+  static Future<void> setThemeMode(String v) =>
+      _prefs.setString(_kThemeMode, v);
 }

@@ -410,17 +410,17 @@ class _HomeScreenState extends State<HomeScreen> {
               maxLength: 20,
               textInputAction: TextInputAction.done,
               onChanged: (v) => _update(() => _s.title = v),
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.w800,
-                color: AppColors.darkText,
+                color: context.colors.text,
               ),
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 hintText: '모임 이름 (예: 불금 팀 회식)',
                 counterText: '',
                 contentPadding: EdgeInsets.zero,
-                suffixIcon:
-                    Icon(Icons.edit_rounded, size: 16, color: AppColors.hint),
+                suffixIcon: Icon(Icons.edit_rounded,
+                    size: 16, color: context.colors.hint),
                 suffixIconConstraints:
                     BoxConstraints(minWidth: 24, minHeight: 24),
               ),
@@ -432,7 +432,7 @@ class _HomeScreenState extends State<HomeScreen> {
         IconButton(
           tooltip: '지난 정산',
           onPressed: _openHistory,
-          icon: const Icon(Icons.history_rounded, color: AppColors.darkText),
+          icon: Icon(Icons.history_rounded, color: context.colors.text),
         ),
         _ProBadgeButton(isPro: isPro, onTap: _openSettings),
         const SizedBox(width: 12),
@@ -442,7 +442,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _buildMembersCard() {
     return Container(
-      decoration: AppDecor.card,
+      decoration: AppDecor.card(context),
       padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -460,7 +460,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
               const Spacer(),
-              const Text('탭하면 이름 수정', style: _Txt.caption),
+              Text('탭하면 이름 수정', style: _Txt.caption(context)),
             ],
           ),
           const SizedBox(height: 12),
@@ -496,7 +496,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
     return Container(
       key: ValueKey(r.id),
-      decoration: AppDecor.card,
+      decoration: AppDecor.card(context),
       padding: const EdgeInsets.fromLTRB(16, 12, 8, 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -512,10 +512,10 @@ class _HomeScreenState extends State<HomeScreen> {
                   maxLength: 15,
                   textInputAction: TextInputAction.done,
                   onChanged: (v) => _update(() => r.name = v),
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.w700,
-                    color: AppColors.darkText,
+                    color: context.colors.text,
                   ),
                   decoration: InputDecoration(
                     hintText:
@@ -527,8 +527,8 @@ class _HomeScreenState extends State<HomeScreen> {
               IconButton(
                 tooltip: '${index + 1}차 삭제',
                 visualDensity: VisualDensity.compact,
-                icon: const Icon(Icons.delete_outline_rounded,
-                    color: AppColors.subText, size: 22),
+                icon: Icon(Icons.delete_outline_rounded,
+                    color: context.colors.subText, size: 22),
                 onPressed: () => _deleteRound(r),
               ),
             ],
@@ -544,7 +544,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text('결제 금액', style: _Txt.caption),
+                      Text('결제 금액', style: _Txt.caption(context)),
                       TextField(
                         controller: amountCtrl,
                         autofocus: r.id == _autofocusRoundId,
@@ -562,22 +562,23 @@ class _HomeScreenState extends State<HomeScreen> {
                           r.amount = int.tryParse(v.replaceAll(',', '')) ?? 0;
                           _autofocusRoundId = null;
                         }),
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 22,
                           fontWeight: FontWeight.w800,
-                          color: AppColors.darkText,
+                          color: context.colors.text,
                         ),
-                        decoration: const InputDecoration(
+                        decoration: InputDecoration(
                           hintText: '0',
                           suffixText: '원',
                           suffixStyle: TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.w600,
-                            color: AppColors.darkText,
+                            color: context.colors.text,
                           ),
                           contentPadding: EdgeInsets.symmetric(vertical: 6),
                           enabledBorder: UnderlineInputBorder(
-                            borderSide: BorderSide(color: AppColors.border),
+                            borderSide:
+                                BorderSide(color: context.colors.border),
                           ),
                           focusedBorder: UnderlineInputBorder(
                             borderSide:
@@ -592,7 +593,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    const Text('1인당', style: _Txt.caption),
+                    Text('1인당', style: _Txt.caption(context)),
                     ConstrainedBox(
                       constraints: const BoxConstraints(maxWidth: 150),
                       child: FittedBox(
@@ -613,7 +614,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     if (r.hasSober && per > 0)
                       Text(
                         '술X ${Fmt.won(r.soberPerPerson(unit))}',
-                        style: _Txt.caption,
+                        style: _Txt.caption(context),
                       ),
                   ],
                 ),
@@ -663,10 +664,10 @@ class _HomeScreenState extends State<HomeScreen> {
                       child: Text(
                         '${r.headCount}명',
                         textAlign: TextAlign.center,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.w800,
-                          color: AppColors.darkText,
+                          color: context.colors.text,
                         ),
                       ),
                     ),
@@ -694,8 +695,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 // ── 술 안 마신 인원 할인 ──
                 Row(
                   children: [
-                    const Icon(Icons.local_drink_outlined,
-                        size: 18, color: AppColors.subText),
+                    Icon(Icons.local_drink_outlined,
+                        size: 18, color: context.colors.subText),
                     const SizedBox(width: 6),
                     const Expanded(
                       child: Text('술 안 마신 인원 20% 할인', style: _Txt.label),
@@ -730,7 +731,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                       fontWeight: FontWeight.w700,
                                       color: AppColors.primary,
                                     )
-                                  : _Txt.caption,
+                                  : _Txt.caption(context),
                             ),
                             const SizedBox(height: 8),
                             Wrap(
@@ -761,16 +762,16 @@ class _HomeScreenState extends State<HomeScreen> {
     final surplus = showPreview ? _s.surplus : 0;
 
     return Container(
-      decoration: AppDecor.card,
+      decoration: AppDecor.card(context),
       padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text('자투리 올림 단위', style: _Txt.cardTitle),
           const SizedBox(height: 4),
-          const Text(
+          Text(
             '1인당 금액을 올림해서 총무가 손해 보지 않아요',
-            style: _Txt.caption,
+            style: _Txt.caption(context),
           ),
           const SizedBox(height: 12),
           Wrap(
@@ -793,7 +794,7 @@ class _HomeScreenState extends State<HomeScreen> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               decoration: BoxDecoration(
-                color: AppColors.primaryLight,
+                color: context.colors.primaryLight,
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Row(
@@ -856,21 +857,15 @@ class ThousandsFormatter extends TextInputFormatter {
 // ═════════════════════════════════════════════
 
 class _Txt {
-  static const cardTitle = TextStyle(
-    fontSize: 15,
-    fontWeight: FontWeight.w800,
-    color: AppColors.darkText,
-  );
-  static const label = TextStyle(
-    fontSize: 14,
-    fontWeight: FontWeight.w600,
-    color: AppColors.darkText,
-  );
-  static const caption = TextStyle(
-    fontSize: 12,
-    fontWeight: FontWeight.w500,
-    color: AppColors.subText,
-  );
+  // 글자색을 지정하지 않으면 테마의 기본 글자색(라이트/다크 자동)이 적용됩니다.
+  static const cardTitle = TextStyle(fontSize: 15, fontWeight: FontWeight.w800);
+  static const label = TextStyle(fontSize: 14, fontWeight: FontWeight.w600);
+
+  static TextStyle caption(BuildContext context) => TextStyle(
+        fontSize: 12,
+        fontWeight: FontWeight.w500,
+        color: context.colors.subText,
+      );
 }
 
 /// 금액이 바뀔 때 숫자가 촤라락 올라가는 애니메이션
@@ -951,7 +946,7 @@ class _TipCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
       decoration: BoxDecoration(
-        color: AppColors.darkText,
+        color: context.colors.inverse,
         borderRadius: BorderRadius.circular(AppDecor.radius),
       ),
       child: Column(
@@ -1014,10 +1009,10 @@ class _SummaryBanner extends StatelessWidget {
       margin: const EdgeInsets.fromLTRB(16, 4, 16, 12),
       padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
       decoration: BoxDecoration(
-        color: AppColors.cardBg,
+        color: context.colors.card,
         borderRadius: BorderRadius.circular(AppDecor.radius),
         border: Border.all(color: AppColors.primary, width: 1.5),
-        boxShadow: AppDecor.shadow,
+        boxShadow: AppDecor.shadow(context),
       ),
       child: Row(
         children: [
@@ -1025,17 +1020,17 @@ class _SummaryBanner extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('총 지출 합계', style: _Txt.caption),
+                Text('총 지출 합계', style: _Txt.caption(context)),
                 const SizedBox(height: 2),
                 FittedBox(
                   fit: BoxFit.scaleDown,
                   alignment: Alignment.centerLeft,
                   child: _AnimatedWon(
                     total,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 22,
                       fontWeight: FontWeight.w900,
-                      color: AppColors.darkText,
+                      color: context.colors.text,
                     ),
                   ),
                 ),
@@ -1046,12 +1041,12 @@ class _SummaryBanner extends StatelessWidget {
             width: 1,
             height: 36,
             margin: const EdgeInsets.symmetric(horizontal: 16),
-            color: AppColors.border,
+            color: context.colors.border,
           ),
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('총 참여 인원', style: _Txt.caption),
+              Text('총 참여 인원', style: _Txt.caption(context)),
               const SizedBox(height: 2),
               Text(
                 '$people명',
@@ -1115,10 +1110,10 @@ class _SelectChip extends StatelessWidget {
           duration: const Duration(milliseconds: 150),
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
           decoration: BoxDecoration(
-            color: selected ? AppColors.primaryLight : AppColors.cardBg,
+            color: selected ? context.colors.primaryLight : context.colors.card,
             borderRadius: BorderRadius.circular(20),
             border: Border.all(
-              color: selected ? AppColors.primary : AppColors.border,
+              color: selected ? AppColors.primary : context.colors.border,
               width: selected ? 1.5 : 1,
             ),
           ),
@@ -1135,7 +1130,7 @@ class _SelectChip extends StatelessWidget {
                 style: TextStyle(
                   fontSize: 14,
                   fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                  color: selected ? AppColors.primary : AppColors.subText,
+                  color: selected ? AppColors.primary : context.colors.subText,
                 ),
               ),
             ],
@@ -1159,11 +1154,11 @@ class _QuickChip extends StatelessWidget {
   Widget build(BuildContext context) {
     return _PressScale(
       child: Material(
-        color: muted ? AppColors.cardBg : AppColors.background,
+        color: muted ? context.colors.card : context.colors.background,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(10),
           side: muted
-              ? const BorderSide(color: AppColors.border)
+              ? BorderSide(color: context.colors.border)
               : BorderSide.none,
         ),
         child: InkWell(
@@ -1176,7 +1171,7 @@ class _QuickChip extends StatelessWidget {
               style: TextStyle(
                 fontSize: 14,
                 fontWeight: FontWeight.w700,
-                color: muted ? AppColors.subText : AppColors.darkText,
+                color: muted ? context.colors.subText : context.colors.text,
               ),
             ),
           ),
@@ -1202,10 +1197,11 @@ class _PillButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final fg = highlight ? AppColors.primary : AppColors.darkText;
+    final fg = highlight ? AppColors.primary : context.colors.text;
     return _PressScale(
       child: Material(
-        color: highlight ? AppColors.primaryLight : AppColors.background,
+        color:
+            highlight ? context.colors.primaryLight : context.colors.background,
         borderRadius: BorderRadius.circular(20),
         child: InkWell(
           borderRadius: BorderRadius.circular(20),
@@ -1217,7 +1213,8 @@ class _PillButton extends StatelessWidget {
               children: [
                 Icon(icon,
                     size: 16,
-                    color: highlight ? AppColors.primary : AppColors.subText),
+                    color:
+                        highlight ? AppColors.primary : context.colors.subText),
                 const SizedBox(width: 4),
                 Text(
                   label,
@@ -1255,15 +1252,15 @@ class _CounterButton extends StatelessWidget {
       child: _PressScale(
         scale: 0.9,
         child: Material(
-          color: AppColors.cardBg,
-          shape: const CircleBorder(side: BorderSide(color: AppColors.border)),
+          color: context.colors.card,
+          shape: CircleBorder(side: BorderSide(color: context.colors.border)),
           child: InkWell(
             customBorder: const CircleBorder(),
             onTap: onTap,
             child: SizedBox(
               width: 36,
               height: 36,
-              child: Icon(icon, size: 20, color: AppColors.darkText),
+              child: Icon(icon, size: 20, color: context.colors.text),
             ),
           ),
         ),
@@ -1356,7 +1353,7 @@ class _ProBadgeButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: AppColors.cardBg,
+      color: context.colors.card,
       borderRadius: BorderRadius.circular(20),
       child: InkWell(
         borderRadius: BorderRadius.circular(20),
@@ -1366,13 +1363,13 @@ class _ProBadgeButton extends StatelessWidget {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.settings_rounded,
-                  size: 20, color: AppColors.darkText),
+              Icon(Icons.settings_rounded,
+                  size: 20, color: context.colors.text),
               const SizedBox(width: 6),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
-                  color: isPro ? AppColors.primary : AppColors.darkText,
+                  color: isPro ? AppColors.primary : context.colors.inverse,
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Text(
@@ -1400,9 +1397,9 @@ class _KeyboardDoneBar extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       height: 44,
-      decoration: const BoxDecoration(
-        color: Color(0xFFF7F8FA),
-        border: Border(top: BorderSide(color: AppColors.border)),
+      decoration: BoxDecoration(
+        color: context.colors.card,
+        border: Border(top: BorderSide(color: context.colors.border)),
       ),
       padding: const EdgeInsets.symmetric(horizontal: 8),
       alignment: Alignment.centerRight,
@@ -1435,7 +1432,7 @@ class _BottomBar extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        color: AppColors.cardBg,
+        color: context.colors.card,
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.06),
@@ -1511,11 +1508,11 @@ class BannerAdPlaceholder extends StatelessWidget {
     return Container(
       width: double.infinity,
       height: 50,
-      color: AppColors.background,
+      color: context.colors.background,
       alignment: Alignment.center,
-      child: const Text(
+      child: Text(
         'AD · 배너 광고 영역 (320×50)',
-        style: TextStyle(fontSize: 12, color: AppColors.hint),
+        style: TextStyle(fontSize: 12, color: context.colors.hint),
       ),
     );
   }
@@ -1569,7 +1566,7 @@ class _NameDialogState extends State<_NameDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      backgroundColor: AppColors.cardBg,
+      backgroundColor: context.colors.card,
       surfaceTintColor: Colors.transparent,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
       title: Text(
@@ -1582,7 +1579,8 @@ class _NameDialogState extends State<_NameDialog> {
         maxLength: 10,
         textInputAction: TextInputAction.done,
         onSubmitted: (_) => _submit(),
-        decoration: AppDecor.boxInput('이름 입력').copyWith(counterText: ''),
+        decoration:
+            AppDecor.boxInput(context, '이름 입력').copyWith(counterText: ''),
       ),
       actions: [
         if (widget.showDelete)
@@ -1593,7 +1591,7 @@ class _NameDialogState extends State<_NameDialog> {
           ),
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('취소', style: TextStyle(color: AppColors.subText)),
+          child: Text('취소', style: TextStyle(color: context.colors.subText)),
         ),
         TextButton(
           onPressed: _submit,
