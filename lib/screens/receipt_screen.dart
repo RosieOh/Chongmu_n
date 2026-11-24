@@ -5,6 +5,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../models/round_item.dart';
 import '../theme/app_theme.dart';
@@ -41,6 +42,13 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
   final FocusNode _bankFocus = FocusNode();
   final FocusNode _accountFocus = FocusNode();
 
+  late final TextEditingController _tossCtrl =
+      TextEditingController(text: AppStorage.tossLink);
+  late final TextEditingController _kakaoCtrl =
+      TextEditingController(text: AppStorage.kakaoPayLink);
+  bool _tossError = false;
+  bool _kakaoError = false;
+
   /// 송금 정리에서 돈을 받는 사람 중 총무가 아닌 사람 (각자 계좌 필요)
   late final List<Member> _payees = () {
     final s = widget.settlement;
@@ -74,6 +82,32 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
     if (filled) AppStorage.saveSettlement(widget.settlement);
   }
 
+  /// 총무의 바로 송금 링크 ('· 토스 https://toss.me/...')
+  List<String> get _payLinkLines => [
+        if (AppStorage.tossLink.isNotEmpty) '· 토스 ${AppStorage.tossLink}',
+        if (AppStorage.kakaoPayLink.isNotEmpty)
+          '· 카카오페이 ${AppStorage.kakaoPayLink}',
+      ];
+
+  void _writePayLinks(StringBuffer b) {
+    final lines = _payLinkLines;
+    if (lines.isEmpty) return;
+    b
+      ..writeln()
+      ..writeln('👉 눌러서 바로 송금');
+    lines.forEach(b.writeln);
+  }
+
+  Future<void> _openLink(String link) async {
+    HapticFeedback.lightImpact();
+    var ok = false;
+    try {
+      ok = await launchUrl(Uri.parse(link),
+          mode: LaunchMode.externalApplication);
+    } catch (_) {}
+    if (!ok && mounted) _toast('링크를 열지 못했어요. 주소를 다시 확인해 주세요');
+  }
+
   /// 받는 사람의 계좌 (총무는 '내 입금 계좌')
   String _accountOf(Member m) => m.id == widget.settlement.treasurer.id
       ? _accountLine()
@@ -97,6 +131,8 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
     _accountCtrl.dispose();
     _bankFocus.dispose();
     _accountFocus.dispose();
+    _tossCtrl.dispose();
+    _kakaoCtrl.dispose();
     for (final c in _payeeCtrls.values) {
       c.dispose();
     }
@@ -171,6 +207,11 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
           ..writeln('🏦 $account');
       }
     }
+    if (!_transferMode ||
+        _dues.any((d) =>
+            !_isPaid(d) && d.transfers.any((t) => t.to.id == s.treasurer.id))) {
+      _writePayLinks(b);
+    }
     return b.toString().trimRight();
   }
 
@@ -209,6 +250,9 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
           b.writeln('· ${t.to.name}에게 ${Fmt.won(t.amount)}'
               '${acc.isEmpty ? '' : '\n  🏦 $acc'}');
         }
+        if (due.transfers.any((t) => t.to.id == s.treasurer.id)) {
+          _writePayLinks(b);
+        }
       }
     } else {
       final account = _accountLine();
@@ -217,6 +261,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
           ..writeln()
           ..writeln('🏦 $account');
       }
+      _writePayLinks(b);
     }
     return b.toString().trimRight();
   }
@@ -332,6 +377,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
       b.writeln(_transferMode ? '🏦 ${s.treasurer.name} 계좌' : '🏦 입금 계좌');
       b.writeln(account);
     }
+    _writePayLinks(b);
 
     b.writeln();
     b.writeln('※ ${s.roundingLabel} 정산');
@@ -756,12 +802,77 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
               setState(() {});
             },
           ),
+          const SizedBox(height: 16),
+          Text(
+            '바로 송금 링크 (선택)',
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w800,
+              color: context.colors.text,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            '토스·카카오페이 앱의 \'내 송금 링크\'를 넣으면 카톡 메시지에서 눌러서 바로 송금할 수 있어요',
+            style: TextStyle(fontSize: 12, color: context.colors.subText),
+          ),
+          const SizedBox(height: 8),
+          _payLinkField(
+            controller: _tossCtrl,
+            hint: '토스 아이디 또는 toss.me/아이디',
+            error: _tossError ? 'toss.me/아이디 형식으로 넣어 주세요' : null,
+            saved: AppStorage.tossLink,
+            onChanged: (v) {
+              final link = normalizeTossLink(v);
+              setState(() => _tossError = link == null);
+              if (link != null) AppStorage.setTossLink(link);
+            },
+          ),
+          const SizedBox(height: 8),
+          _payLinkField(
+            controller: _kakaoCtrl,
+            hint: '카카오페이 송금 링크 (qr.kakaopay.com/...)',
+            error: _kakaoError ? 'qr.kakaopay.com/... 링크를 붙여 넣어 주세요' : null,
+            saved: AppStorage.kakaoPayLink,
+            onChanged: (v) {
+              final link = normalizeKakaoPayLink(v);
+              setState(() => _kakaoError = link == null);
+              if (link != null) AppStorage.setKakaoPayLink(link);
+            },
+          ),
           const SizedBox(height: 8),
           Text(
             '입력한 계좌는 이 휴대폰에만 저장되고, 영수증과 카톡 텍스트에 함께 표시돼요.',
             style: TextStyle(fontSize: 12, color: context.colors.subText),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _payLinkField({
+    required TextEditingController controller,
+    required String hint,
+    required String? error,
+    required String saved,
+    required ValueChanged<String> onChanged,
+  }) {
+    return TextField(
+      controller: controller,
+      keyboardType: TextInputType.url,
+      autocorrect: false,
+      textInputAction: TextInputAction.done,
+      onChanged: onChanged,
+      decoration: AppDecor.boxInput(context, hint).copyWith(
+        errorText: error,
+        suffixIcon: saved.isEmpty || error != null
+            ? null
+            : IconButton(
+                tooltip: '링크 열어서 확인',
+                icon: const Icon(Icons.open_in_new_rounded,
+                    size: 20, color: AppColors.primary),
+                onPressed: () => _openLink(saved),
+              ),
       ),
     );
   }

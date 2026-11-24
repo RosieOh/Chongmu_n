@@ -218,6 +218,20 @@ void main() {
     expect(copy.extras, isEmpty);
   });
 
+  test('송금 링크 정리: 토스 아이디/주소, 카카오페이 주소만 허용', () {
+    expect(normalizeTossLink(''), '');
+    expect(normalizeTossLink('chongmu'), 'https://toss.me/chongmu');
+    expect(normalizeTossLink(' toss.me/chongmu/ '), 'https://toss.me/chongmu');
+    expect(normalizeTossLink('http://toss.me/a_b'), 'https://toss.me/a_b');
+    expect(normalizeTossLink('https://evil.com/x'), isNull);
+    expect(normalizeTossLink('한글 아이디'), isNull);
+
+    expect(normalizeKakaoPayLink(''), '');
+    expect(normalizeKakaoPayLink('qr.kakaopay.com/Ej7abc123'),
+        'https://qr.kakaopay.com/Ej7abc123');
+    expect(normalizeKakaoPayLink('https://toss.me/x'), isNull);
+  });
+
   group('결제자 지정 / 송금 정리', () {
     test('총무 혼자 결제하면 기존처럼 전원이 총무에게 입금', () {
       final s = Settlement.sample();
@@ -351,6 +365,7 @@ void main() {
       await AppStorage.saveSettlement(a);
       await AppStorage.setAccountNumber('3333-01');
       await AppStorage.setPro(true);
+      await AppStorage.setTossLink('https://toss.me/chongmu');
       final current = Settlement.blank()..title = '작성 중';
       current.rounds.first.amount = 5000;
       final backup = AppStorage.exportBackup(current);
@@ -365,6 +380,7 @@ void main() {
       expect(restored.usesTransfers, isTrue);
       expect(AppStorage.accountNumber, '3333-01');
       expect(AppStorage.isPro, isFalse);
+      expect(AppStorage.tossLink, 'https://toss.me/chongmu');
 
       // 두 번 복원해도 중복되지 않음
       await AppStorage.importBackup(backup);

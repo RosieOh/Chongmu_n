@@ -48,6 +48,7 @@ void main() {
         await pumpScreen(tester, ReceiptScreen(settlement: s), mode);
         expect(find.text('입금 확인'), findsOneWidget);
         expect(find.text('1/4명'), findsOneWidget);
+        expect(find.text('바로 송금 링크 (선택)'), findsOneWidget);
       });
 
       testWidgets('메인 화면 (할인·개별 추가·다른 결제자)', (tester) async {

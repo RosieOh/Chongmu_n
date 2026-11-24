@@ -55,6 +55,29 @@ int roundMoney(double value, int unit, RoundMode mode) {
   return ((value / u) + 1e-9).round() * u;
 }
 
+/// 토스 송금 링크로 정리 ('chongmu' / 'toss.me/chongmu' → https://toss.me/chongmu).
+/// 빈 값은 '', 알아볼 수 없는 값은 null.
+String? normalizeTossLink(String input) {
+  final v = input.trim();
+  if (v.isEmpty) return '';
+  final m =
+      RegExp(r'^(?:https?://)?toss\.me/([A-Za-z0-9_.\-]+)/?$').firstMatch(v);
+  if (m != null) return 'https://toss.me/${m.group(1)}';
+  if (RegExp(r'^[A-Za-z0-9_.\-]{2,}$').hasMatch(v)) return 'https://toss.me/$v';
+  return null;
+}
+
+/// 카카오페이 송금 링크로 정리 (qr.kakaopay.com/... 형식만 허용).
+/// 빈 값은 '', 알아볼 수 없는 값은 null.
+String? normalizeKakaoPayLink(String input) {
+  final v = input.trim();
+  if (v.isEmpty) return '';
+  final m = RegExp(r'^(?:https?://)?qr\.kakaopay\.com/([A-Za-z0-9_\-]+)/?$')
+      .firstMatch(v);
+  if (m != null) return 'https://qr.kakaopay.com/${m.group(1)}';
+  return null;
+}
+
 // ─────────────────────────────────────────────
 // 모임 멤버
 // ─────────────────────────────────────────────
@@ -677,6 +700,8 @@ class AppStorage {
   static const _kHistory = 'history_v1';
   static const _kThemeMode = 'theme_mode';
   static const _kMemberAccounts = 'member_accounts_v1';
+  static const _kTossLink = 'pay_link_toss';
+  static const _kKakaoPayLink = 'pay_link_kakaopay';
 
   /// 기록은 최근 100건까지만 보관 (기기 저장 공간 보호)
   static const int historyLimit = 100;
@@ -816,6 +841,8 @@ class AppStorage {
           'bank': bankName,
           'holder': accountHolder,
           'number': accountNumber,
+          'toss': tossLink,
+          'kakaopay': kakaoPayLink,
         },
       });
 
@@ -866,6 +893,17 @@ class AppStorage {
           ..add(setAccountHolder((account['holder'] as String?)?.trim() ?? ''));
       }
     }
+    if (account is Map) {
+      final toss = normalizeTossLink((account['toss'] as String?) ?? '');
+      if (tossLink.isEmpty && toss != null && toss.isNotEmpty) {
+        writes.add(setTossLink(toss));
+      }
+      final kakao =
+          normalizeKakaoPayLink((account['kakaopay'] as String?) ?? '');
+      if (kakaoPayLink.isEmpty && kakao != null && kakao.isNotEmpty) {
+        writes.add(setKakaoPayLink(kakao));
+      }
+    }
     await Future.wait(writes);
     return incoming.length;
   }
@@ -896,6 +934,13 @@ class AppStorage {
     }
     return _prefs.setString(_kMemberAccounts, jsonEncode(map));
   }
+
+  /// 총무의 송금 링크 (카톡 메시지에 함께 붙여서 바로 송금받기)
+  static String get tossLink => _prefs.getString(_kTossLink) ?? '';
+  static String get kakaoPayLink => _prefs.getString(_kKakaoPayLink) ?? '';
+  static Future<void> setTossLink(String v) => _prefs.setString(_kTossLink, v);
+  static Future<void> setKakaoPayLink(String v) =>
+      _prefs.setString(_kKakaoPayLink, v);
 
   static String get bankName => _prefs.getString(_kBank) ?? '';
   static String get accountHolder => _prefs.getString(_kHolder) ?? '';
