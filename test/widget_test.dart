@@ -126,6 +126,73 @@ void main() {
     expect(next.roundUnit, 1000);
   });
 
+  test('면제 인원: 0원, 나머지가 나눠 냄, 추가금도 나머지 부담, 입금 대상 제외', () {
+    final s = Settlement.sample();
+    final r = s.rounds.first; // 120,000원 / 4명
+    final me = s.members[0], minsu = s.members[1];
+    r.setExtra(minsu.id, 12000);
+    r
+      ..freeMode = true
+      ..freeIds.add(minsu.id);
+    expect(r.payingCount, 3);
+    expect(r.exactShareFor(minsu.id), 0);
+    expect(r.exactShareFor(me.id), 40000);
+    expect(r.perPerson(100), 40000);
+
+    s.rounds.removeAt(1); // 1차만 남김
+    final dues = s.buildDues();
+    expect(dues.any((d) => d.member.id == minsu.id), isFalse);
+    expect(dues.length, 3);
+
+    // 토글을 끄면 원래대로 (추가금도 다시 본인 부담)
+    r.freeMode = false;
+    expect(r.exactShareFor(minsu.id), 39000);
+
+    final restored = RoundItem.fromJson((r..freeMode = true).toJson());
+    expect(restored.isFree(minsu.id), isTrue);
+  });
+
+  test('자투리 계산 방식: 반올림 / 1원 단위 정확히', () {
+    final s = Settlement.sample(); // 51,333.3원
+    s.roundMode = RoundMode.nearest;
+    expect(s.buildResults().first.pay, 51300);
+    expect(s.surplus, lessThan(0));
+    expect(s.roundingLabel, '100원 단위 반올림');
+
+    s.roundUnit = 1;
+    expect(s.buildResults().first.pay, 51333);
+    expect(s.roundingLabel, '1원 단위 정확히');
+
+    final restored = Settlement.fromJson(s.toJson());
+    expect(restored.roundMode, RoundMode.nearest);
+    expect(restored.roundUnit, 1);
+    expect(Settlement.fromJson(s.toJson()..remove('roundMode')).roundMode,
+        RoundMode.up);
+
+    // 총무가 모자라도 송금 정리가 맞아떨어짐
+    s.roundUnit = 1000;
+    s.rounds[1].payerId = s.members[1].id;
+    final sent = s.buildTransfers().fold(0, (a, t) => a + t.amount);
+    expect(sent, greaterThan(0));
+  });
+
+  test('차수 복제: 참석자·할인·결제자 유지, 금액·추가금은 비움', () {
+    final s = Settlement.sample();
+    final r = s.rounds[1]
+      ..soberDiscount = true
+      ..payerId = s.members[1].id;
+    r.soberIds.add(s.members[2].id);
+    r.setExtra(s.members[0].id, 5000);
+    final copy = r.duplicate();
+    expect(copy.id, isNot(r.id));
+    expect(copy.participantIds, r.participantIds);
+    expect(identical(copy.participantIds, r.participantIds), isFalse);
+    expect(copy.soberIds, r.soberIds);
+    expect(copy.payerId, r.payerId);
+    expect(copy.amount, 0);
+    expect(copy.extras, isEmpty);
+  });
+
   group('결제자 지정 / 송금 정리', () {
     test('총무 혼자 결제하면 기존처럼 전원이 총무에게 입금', () {
       final s = Settlement.sample();

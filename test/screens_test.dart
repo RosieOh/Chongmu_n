@@ -58,10 +58,16 @@ void main() {
           ..payerId = s.members[2].id;
         r.soberIds.add(s.members[3].id);
         r.setExtra(s.members[1].id, 12000);
+        s.rounds[1]
+          ..freeMode = true
+          ..freeIds.add(s.members[0].id);
+        s.roundMode = RoundMode.nearest;
         await AppStorage.saveSettlement(s);
         await pumpScreen(tester, const HomeScreen(), mode);
         expect(find.text('술 안 마신 인원 30% 할인'), findsOneWidget);
         expect(find.text('민수 +12,000원'), findsOneWidget);
+        expect(find.text('면제 인원 (생일자 등)'), findsNWidgets(2));
+        expect(find.text('반올림'), findsOneWidget);
       });
 
       testWidgets('영수증 화면 (송금 정리)', (tester) async {

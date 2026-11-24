@@ -164,6 +164,10 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
     } else {
       b.writeln('💸 1인별 입금액');
       for (final p in _results) {
+        if (p.pay == 0) {
+          b.writeln('· ${p.member.name}  면제 🎂');
+          continue;
+        }
         b.writeln('· ${p.member.name}  ${Fmt.won(p.pay)}'
             '${_isMemberPaid(p.member.id) ? ' ✅입금완료' : ''}');
       }
@@ -177,7 +181,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
     }
 
     b.writeln();
-    b.writeln('※ ${Fmt.number(s.roundUnit)}원 단위 올림 정산');
+    b.writeln('※ ${s.roundingLabel} 정산');
     if (!isPro) b.writeln('— 똑똑한 총무 앱으로 정산했어요');
     return b.toString().trimRight();
   }
@@ -1001,7 +1005,9 @@ class _ReceiptPaper extends StatelessWidget {
             ),
             const SizedBox(height: 6),
             Text(
-              '${Fmt.number(s.roundUnit)}원 단위 올림으로 생긴 금액이에요',
+              s.roundUnit == 1
+                  ? '1원 단위까지 정확히 나눴어요'
+                  : '${s.roundingLabel}으로 생긴 금액이에요',
               style: _sub,
               textAlign: TextAlign.right,
             ),
@@ -1069,10 +1075,14 @@ class _ReceiptPaper extends StatelessWidget {
   Widget _roundRow(int i) {
     final r = settlement.rounds[i];
     final unit = settlement.roundUnit;
-    final detail =
-        StringBuffer('${r.headCount}명 · 1인 ${Fmt.won(r.perPerson(unit))}');
+    final mode = settlement.roundMode;
+    final detail = StringBuffer(
+        '${r.headCount}명 · 1인 ${Fmt.won(r.perPerson(unit, mode))}');
     if (r.hasSober) {
-      detail.write(' · 술X ${Fmt.won(r.soberPerPerson(unit))}');
+      detail.write(' · 술X ${Fmt.won(r.soberPerPerson(unit, mode))}');
+    }
+    if (r.hasFree) {
+      detail.write(' · 면제 ${r.freeIds.length}명');
     }
     if (r.extras.isNotEmpty) {
       detail.write(' · 개별 추가 ${Fmt.won(r.extrasTotal)}');
@@ -1096,6 +1106,7 @@ class _ReceiptPaper extends StatelessWidget {
   /// '1차', '2차(술X)', '1차(+12,000)' 처럼 참석 차수 표시
   String _attendLabel(int i, RoundItem r, String memberId) {
     final tags = <String>[
+      if (r.isFree(memberId)) '면제',
       if (r.hasSober && r.soberIds.contains(memberId)) '술X',
       if (r.extraOf(memberId) > 0) '+${Fmt.number(r.extraOf(memberId))}',
     ];

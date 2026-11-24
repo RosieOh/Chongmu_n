@@ -31,6 +31,30 @@ int roundUpTo(double value, int unit) {
   return ((value / u) - 1e-9).ceil() * u;
 }
 
+/// 자투리 계산 방식
+enum RoundMode {
+  /// 올림 — 총무가 손해 보지 않음 (기본)
+  up('올림'),
+
+  /// 반올림 — 더 공평하지만 총무가 조금 모자랄 수 있음
+  nearest('반올림');
+
+  const RoundMode(this.label);
+
+  final String label;
+
+  static RoundMode parse(String? v) =>
+      values.firstWhere((m) => m.name == v, orElse: () => up);
+}
+
+/// 단위 + 방식에 맞춰 금액 정리
+int roundMoney(double value, int unit, RoundMode mode) {
+  if (value <= 0) return 0;
+  if (mode == RoundMode.up) return roundUpTo(value, unit);
+  final u = unit <= 0 ? 1 : unit;
+  return ((value / u) + 1e-9).round() * u;
+}
+
 // ─────────────────────────────────────────────
 // 모임 멤버
 // ─────────────────────────────────────────────
@@ -66,7 +90,10 @@ class RoundItem {
     int discountPercent = defaultDiscount,
     Map<String, int>? extras,
     this.payerId,
-  })  : extras = extras ?? <String, int>{},
+    this.freeMode = false,
+    Set<String>? freeIds,
+  })  : freeIds = freeIds ?? <String>{},
+        extras = extras ?? <String, int>{},
         discountPercent = discountOptions.contains(discountPercent)
             ? discountPercent
             : defaultDiscount,
@@ -96,6 +123,19 @@ class RoundItem {
   /// 술 안 마신 사람이 내는 비율 (20% 할인 → 0.8)
   double get soberRate => (100 - discountPercent) / 100;
 
+  /// '면제 인원' 토글 (생일자 등 — 한 푼도 안 냄)
+  bool freeMode;
+
+  /// 면제된 멤버 ID (participantIds 의 부분집합). 나머지가 나눠 냅니다.
+  final Set<String> freeIds;
+
+  bool isFree(String memberId) => freeMode && freeIds.contains(memberId);
+
+  bool get hasFree => freeMode && freeIds.isNotEmpty;
+
+  /// 실제로 돈을 내는 인원
+  int get payingCount => participantIds.where((id) => !isFree(id)).length;
+
   /// 이 차수를 실제로 결제한 멤버 ID (null 이면 총무 = 첫 번째 멤버)
   String? payerId;
 
@@ -103,9 +143,12 @@ class RoundItem {
   /// 결제 금액에서 추가금을 먼저 빼고, 남은 금액을 N빵합니다.
   final Map<String, int> extras;
 
-  int get extrasTotal => extras.values.fold(0, (sum, v) => sum + v);
+  /// 개별 추가금 합계 (면제된 사람의 추가금은 다른 사람들이 나눠 냄)
+  int get extrasTotal => extras.entries
+      .where((e) => !isFree(e.key))
+      .fold(0, (sum, e) => sum + e.value);
 
-  int extraOf(String memberId) => extras[memberId] ?? 0;
+  int extraOf(String memberId) => isFree(memberId) ? 0 : extras[memberId] ?? 0;
 
   /// 추가금이 결제 금액보다 큰 잘못된 입력인지
   bool get extrasOverflow => extrasTotal > amount;
@@ -126,8 +169,10 @@ class RoundItem {
 
   bool get hasSober => soberDiscount && soberIds.isNotEmpty;
 
-  double weightOf(String memberId) =>
-      soberDiscount && soberIds.contains(memberId) ? soberRate : 1.0;
+  double weightOf(String memberId) {
+    if (isFree(memberId)) return 0;
+    return soberDiscount && soberIds.contains(memberId) ? soberRate : 1.0;
+  }
 
   double get _totalWeight {
     var w = 0.0;
@@ -145,23 +190,38 @@ class RoundItem {
     return sharedAmount * weightOf(memberId) / tw + extraOf(memberId);
   }
 
-  /// 카드에 표시할 1인당 금액 (술 마신 사람 기준, 추가금 제외, 올림)
-  int perPerson(int unit) {
-    if (amount <= 0 || headCount == 0) return 0;
-    return roundUpTo(sharedAmount / _totalWeight, unit);
+  /// 카드에 표시할 1인당 금액 (술 마신 사람 기준, 추가금 제외)
+  int perPerson(int unit, [RoundMode mode = RoundMode.up]) {
+    final tw = _totalWeight;
+    if (amount <= 0 || tw <= 0) return 0;
+    return roundMoney(sharedAmount / tw, unit, mode);
   }
 
-  /// 술 안 마신 사람의 1인당 금액 (추가금 제외, 올림)
-  int soberPerPerson(int unit) {
-    if (amount <= 0 || headCount == 0) return 0;
-    return roundUpTo(sharedAmount * soberRate / _totalWeight, unit);
+  /// 술 안 마신 사람의 1인당 금액 (추가금 제외)
+  int soberPerPerson(int unit, [RoundMode mode = RoundMode.up]) {
+    final tw = _totalWeight;
+    if (amount <= 0 || tw <= 0) return 0;
+    return roundMoney(sharedAmount * soberRate / tw, unit, mode);
   }
 
   void removeParticipant(String memberId) {
     participantIds.remove(memberId);
     soberIds.remove(memberId);
+    freeIds.remove(memberId);
     extras.remove(memberId);
   }
+
+  /// 다음 차수로 복제 (참석자·할인·면제는 그대로, 금액·장소·추가금은 비움)
+  RoundItem duplicate() => RoundItem(
+        id: newId(),
+        participantIds: {...participantIds},
+        soberDiscount: soberDiscount,
+        soberIds: {...soberIds},
+        discountPercent: discountPercent,
+        payerId: payerId,
+        freeMode: freeMode,
+        freeIds: {...freeIds},
+      );
 
   Map<String, dynamic> toJson() => {
         'id': id,
@@ -173,6 +233,8 @@ class RoundItem {
         'discountPercent': discountPercent,
         'extras': Map<String, int>.of(extras),
         if (payerId != null) 'payerId': payerId,
+        'freeMode': freeMode,
+        'freeIds': freeIds.toList(),
       };
 
   factory RoundItem.fromJson(Map<String, dynamic> json) {
@@ -199,6 +261,9 @@ class RoundItem {
           (json['discountPercent'] as num?)?.toInt() ?? defaultDiscount,
       extras: extras,
       payerId: json['payerId'] as String?,
+      freeMode: (json['freeMode'] as bool?) ?? false,
+      freeIds: Set<String>.from((json['freeIds'] as List?) ?? const [])
+        ..retainAll(participants),
     );
   }
 }
@@ -280,12 +345,14 @@ class Settlement {
     required this.members,
     required this.rounds,
     this.roundUnit = 100,
+    this.roundMode = RoundMode.up,
     Set<String>? paidIds,
   })  : id = id ?? newId(),
         createdAt = createdAt ?? DateTime.now(),
         paidIds = paidIds ?? <String>{};
 
-  static const List<int> unitOptions = [10, 100, 1000];
+  /// 1원 단위 = 자투리 없이 정확히
+  static const List<int> unitOptions = [1, 10, 100, 1000];
 
   /// 정산 기록 구분용 고유 ID
   final String id;
@@ -313,8 +380,16 @@ class Settlement {
   final List<Member> members;
   final List<RoundItem> rounds;
 
-  /// 올림 단위: 10 / 100 / 1000
+  /// 정리 단위: 1 / 10 / 100 / 1000
   int roundUnit;
+
+  /// 올림 / 반올림
+  RoundMode roundMode;
+
+  /// '100원 단위 올림' / '1원 단위(정확히)'
+  String get roundingLabel => roundUnit == 1
+      ? '1원 단위 정확히'
+      : '${Fmt.number(roundUnit)}원 단위 ${roundMode.label}';
 
   int get totalSpent => rounds.fold(0, (sum, r) => sum + r.amount);
 
@@ -420,7 +495,11 @@ class Settlement {
   List<Due> buildDues([List<PersonResult>? results]) {
     final res = results ?? buildResults();
     if (!usesTransfers) {
-      return [for (final p in res) Due(member: p.member, amount: p.pay)];
+      // 면제 등으로 낼 돈이 0원인 사람은 입금 확인 대상이 아니에요
+      return [
+        for (final p in res)
+          if (p.pay > 0) Due(member: p.member, amount: p.pay),
+      ];
     }
     final transfers = buildTransfers(res);
     return [
@@ -463,7 +542,7 @@ class Settlement {
         member: m,
         roundShares: shares,
         exactTotal: total,
-        pay: roundUpTo(total, roundUnit),
+        pay: roundMoney(total, roundUnit, roundMode),
       ));
     }
     return results;
@@ -522,6 +601,7 @@ class Settlement {
   factory Settlement.fresh({
     required List<Member> members,
     int roundUnit = 100,
+    RoundMode roundMode = RoundMode.up,
     String title = '',
   }) {
     final s = Settlement(
@@ -529,6 +609,7 @@ class Settlement {
       members: members.map((m) => m.copy()).toList(),
       rounds: [],
       roundUnit: roundUnit,
+      roundMode: roundMode,
     );
     s.addRound();
     return s;
@@ -542,6 +623,7 @@ class Settlement {
         'members': members.map((m) => m.toJson()).toList(),
         'rounds': rounds.map((r) => r.toJson()).toList(),
         'roundUnit': roundUnit,
+        'roundMode': roundMode.name,
         'paidIds': paidIds.toList(),
       };
 
@@ -559,6 +641,7 @@ class Settlement {
           .map((e) => RoundItem.fromJson(Map<String, dynamic>.from(e as Map)))
           .toList(),
       roundUnit: unitOptions.contains(unit) ? unit : 100,
+      roundMode: RoundMode.parse(json['roundMode'] as String?),
       paidIds: Set<String>.from((json['paidIds'] as List?) ?? const []),
     );
     s.paidIds.retainWhere((id) => s.members.any((m) => m.id == id));
