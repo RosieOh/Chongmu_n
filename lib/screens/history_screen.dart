@@ -25,6 +25,34 @@ bool matchesHistoryQuery(Settlement s, String query) {
       s.rounds.any((r) => has(r.name));
 }
 
+/// 최근 [count]개월 월별 지출 합계 (오래된 달 → 이번 달 순)
+List<(DateTime month, int total)> monthlyTotals(
+  List<Settlement> items,
+  DateTime now, {
+  int count = 6,
+}) {
+  return [
+    for (var i = count - 1; i >= 0; i--)
+      () {
+        final m = DateTime(now.year, now.month - i);
+        final total = items
+            .where((s) =>
+                s.createdAt.year == m.year && s.createdAt.month == m.month)
+            .fold<int>(0, (sum, s) => sum + s.totalSpent);
+        return (m, total);
+      }(),
+  ];
+}
+
+/// 차트 라벨용 짧은 금액 (184,000 → 18.4만, 1,250,000 → 125만)
+String shortWon(int v) {
+  if (v <= 0) return '-';
+  if (v < 10000) return Fmt.number(v);
+  final man = v / 10000;
+  final text = man >= 100 ? man.round().toString() : man.toStringAsFixed(1);
+  return '${text.endsWith('.0') ? text.substring(0, text.length - 2) : text}만';
+}
+
 /// ④ 지난 정산 기록 목록
 ///
 /// 항목을 누르면 [HistoryPick] 을 돌려주고(Navigator.pop), 메인 화면이 불러옵니다.
@@ -545,6 +573,8 @@ class _StatsCard extends StatelessWidget {
               stat('이번 달', Fmt.won(thisMonth)),
             ],
           ),
+          const SizedBox(height: 16),
+          _MonthlyChart(data: monthlyTotals(items, now)),
           if (best.isNotEmpty) ...[
             const SizedBox(height: 12),
             Container(
@@ -566,6 +596,91 @@ class _StatsCard extends StatelessWidget {
           ],
         ],
       ),
+    );
+  }
+}
+
+/// 최근 6개월 월별 지출 막대 차트 (단일 시리즈, 값은 막대 위에 직접 표시)
+class _MonthlyChart extends StatelessWidget {
+  const _MonthlyChart({required this.data});
+
+  final List<(DateTime, int)> data;
+
+  static const double _maxBar = 64;
+
+  @override
+  Widget build(BuildContext context) {
+    final max = data.fold<int>(0, (m, e) => e.$2 > m ? e.$2 : m);
+    final caption = TextStyle(fontSize: 11, color: context.colors.subText);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('최근 6개월 지출', style: caption),
+        const SizedBox(height: 8),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            for (final (i, (month, total)) in data.indexed)
+              Expanded(
+                child: Semantics(
+                  label: '${month.month}월 ${Fmt.won(total)}',
+                  excludeSemantics: true,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(
+                          shortWon(total),
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: total > 0
+                                ? context.colors.text
+                                : context.colors.hint,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      TweenAnimationBuilder<double>(
+                        tween: Tween<double>(
+                          end: max == 0 ? 0 : total / max * _maxBar,
+                        ),
+                        duration: const Duration(milliseconds: 400),
+                        curve: Curves.easeOutCubic,
+                        builder: (context, h, _) => Container(
+                          width: 20,
+                          height: total > 0 ? h.clamp(3, _maxBar) : 0,
+                          decoration: const BoxDecoration(
+                            color: AppColors.primary,
+                            borderRadius: BorderRadius.vertical(
+                              top: Radius.circular(4),
+                            ),
+                          ),
+                        ),
+                      ),
+                      Container(height: 1, color: context.colors.border),
+                      const SizedBox(height: 4),
+                      Text(
+                        '${month.month}월',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: i == data.length - 1
+                              ? FontWeight.w800
+                              : FontWeight.w500,
+                          color: i == data.length - 1
+                              ? context.colors.text
+                              : context.colors.subText,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ],
     );
   }
 }

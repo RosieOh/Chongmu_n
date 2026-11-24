@@ -115,6 +115,31 @@ void main() {
     expect(matchesHistoryQuery(s, '노래방'), isFalse);
   });
 
+  test('월별 지출: 최근 6개월(연도 넘김 포함), 짧은 금액 표시', () {
+    Settlement at(DateTime d, int amount) => Settlement(
+          createdAt: d,
+          members: [Member(id: 'm', name: '나')],
+          rounds: [
+            RoundItem(id: 'r', amount: amount, participantIds: {'m'})
+          ],
+        );
+    final items = [
+      at(DateTime(2026, 2, 3), 184000),
+      at(DateTime(2026, 2, 20), 16000),
+      at(DateTime(2025, 10, 1), 50000),
+      at(DateTime(2025, 8, 1), 99999), // 6개월 밖
+    ];
+    final data = monthlyTotals(items, DateTime(2026, 2, 24));
+    expect(data.map((e) => e.$1.month), [9, 10, 11, 12, 1, 2]);
+    expect(data.map((e) => e.$2), [0, 50000, 0, 0, 0, 200000]);
+
+    expect(shortWon(0), '-');
+    expect(shortWon(9500), '9,500');
+    expect(shortWon(184000), '18.4만');
+    expect(shortWon(200000), '20만');
+    expect(shortWon(1250000), '125만');
+  });
+
   test('이 멤버로 새 정산: 제목·멤버 유지, 금액·입금 초기화', () {
     final s = Settlement.sample()..togglePaid('x');
     final next =
