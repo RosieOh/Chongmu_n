@@ -314,6 +314,7 @@ class _HomeScreenState extends State<HomeScreen> {
       _replaceSettlement(Settlement.fresh(
         members: picked.members,
         roundUnit: picked.roundUnit,
+        roundMode: picked.roundMode,
         title: picked.title,
       ));
       _toast('"$title" 멤버로 새 정산을 시작했어요');
@@ -333,7 +334,11 @@ class _HomeScreenState extends State<HomeScreen> {
     switch (action) {
       case SettingsAction.newSettlement:
         _replaceSettlement(
-          Settlement.fresh(members: _s.members, roundUnit: _s.roundUnit),
+          Settlement.fresh(
+            members: _s.members,
+            roundUnit: _s.roundUnit,
+            roundMode: _s.roundMode,
+          ),
         );
         _toast('새 정산을 시작했어요');
       case SettingsAction.loadSample:
@@ -511,7 +516,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _buildRoundCard(int index, RoundItem r) {
     final unit = _s.roundUnit;
-    final per = r.perPerson(unit);
+    final mode = _s.roundMode;
+    final per = r.perPerson(unit, mode);
     final attendees =
         _s.members.where((m) => r.participantIds.contains(m.id)).toList();
     final amountCtrl = _amountCtrl(r);
@@ -546,12 +552,10 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ),
               ),
-              IconButton(
-                tooltip: '${index + 1}차 삭제',
-                visualDensity: VisualDensity.compact,
-                icon: Icon(Icons.delete_outline_rounded,
-                    color: context.colors.subText, size: 22),
-                onPressed: () => _deleteRound(r),
+              _RoundMenu(
+                index: index,
+                count: _s.rounds.length,
+                onSelected: (action) => _onRoundMenu(action, r),
               ),
             ],
           ),
@@ -635,7 +639,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                     if (r.hasSober && per > 0)
                       Text(
-                        '술X ${Fmt.won(r.soberPerPerson(unit))}',
+                        '술X ${Fmt.won(r.soberPerPerson(unit, mode))}',
                         style: _Txt.caption(context),
                       ),
                   ],
@@ -802,6 +806,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           ],
                         ),
                 ),
+                _buildFree(r, attendees),
                 const SizedBox(height: 6),
                 _buildExtras(r, attendees),
               ],
@@ -809,6 +814,117 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  void _onRoundMenu(_RoundAction action, RoundItem r) {
+    final i = _s.rounds.indexOf(r);
+    switch (action) {
+      case _RoundAction.up:
+      case _RoundAction.down:
+        final j = action == _RoundAction.up ? i - 1 : i + 1;
+        if (j < 0 || j >= _s.rounds.length) return;
+        HapticFeedback.lightImpact();
+        _update(() {
+          _s.rounds
+            ..removeAt(i)
+            ..insert(j, r);
+        });
+      case _RoundAction.duplicate:
+        HapticFeedback.lightImpact();
+        final copy = r.duplicate();
+        _update(() {
+          _s.rounds.insert(i + 1, copy);
+          _autofocusRoundId = copy.id;
+        });
+        _toast('${i + 1}차 참석자 그대로 ${i + 2}차를 만들었어요');
+      case _RoundAction.delete:
+        _deleteRound(r);
+    }
+  }
+
+  void _toggleFree(RoundItem r, Member m) {
+    final free = r.freeIds.contains(m.id);
+    if (!free && r.payingCount <= 1) {
+      _toast('최소 1명은 돈을 내야 해요');
+      return;
+    }
+    HapticFeedback.lightImpact();
+    _update(() {
+      if (free) {
+        r.freeIds.remove(m.id);
+      } else {
+        r.freeIds.add(m.id);
+      }
+    });
+  }
+
+  /// 면제 인원 (생일자 등 — 나머지가 나눠 냄)
+  Widget _buildFree(RoundItem r, List<Member> attendees) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(Icons.cake_outlined, size: 18, color: context.colors.subText),
+            const SizedBox(width: 6),
+            const Expanded(
+              child: Text('면제 인원 (생일자 등)', style: _Txt.label),
+            ),
+            Switch.adaptive(
+              value: r.freeMode,
+              activeTrackColor: AppColors.primary,
+              onChanged: (v) {
+                if (v && r.payingCount <= 1 && r.freeIds.isNotEmpty) {
+                  _toast('최소 1명은 돈을 내야 해요');
+                  return;
+                }
+                HapticFeedback.lightImpact();
+                _update(() => r.freeMode = v);
+              },
+            ),
+          ],
+        ),
+        AnimatedSize(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOutCubic,
+          alignment: Alignment.topCenter,
+          child: !r.freeMode
+              ? const SizedBox(width: double.infinity)
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const SizedBox(height: 4),
+                    Text(
+                      r.freeIds.isEmpty
+                          ? '👇 이번 차수에 안 내는 사람을 눌러 주세요'
+                          : '면제 ${r.freeIds.length}명 몫은 나머지 ${r.payingCount}명이 나눠 내요',
+                      style: r.freeIds.isEmpty
+                          ? const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.primary,
+                            )
+                          : _Txt.caption(context),
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        for (final m in attendees)
+                          _SelectChip(
+                            label: '🎂 ${m.name}',
+                            selected: r.freeIds.contains(m.id),
+                            onTap: () => _toggleFree(r, m),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                  ],
+                ),
+        ),
+      ],
     );
   }
 
@@ -962,6 +1078,9 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _buildRoundingCard() {
     final showPreview = _s.totalSpent > 0;
     final surplus = showPreview ? _s.surplus : 0;
+    final exact = _s.roundUnit == 1;
+    final short = surplus < 0;
+    final color = short ? AppColors.danger : AppColors.primary;
 
     return Container(
       decoration: AppDecor.card(context),
@@ -969,10 +1088,14 @@ class _HomeScreenState extends State<HomeScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('자투리 올림 단위', style: _Txt.cardTitle),
+          const Text('자투리 계산 방식', style: _Txt.cardTitle),
           const SizedBox(height: 4),
           Text(
-            '1인당 금액을 올림해서 총무가 손해 보지 않아요',
+            exact
+                ? '1원 단위까지 정확히 나눠요 (자투리 없음)'
+                : _s.roundMode == RoundMode.up
+                    ? '1인당 금액을 올림해서 총무가 손해 보지 않아요'
+                    : '반올림이라 공평하지만 총무가 조금 모자랄 수 있어요',
             style: _Txt.caption(context),
           ),
           const SizedBox(height: 12),
@@ -982,7 +1105,7 @@ class _HomeScreenState extends State<HomeScreen> {
             children: [
               for (final u in Settlement.unitOptions)
                 _SelectChip(
-                  label: '${Fmt.number(u)}원 단위',
+                  label: u == 1 ? '정확히' : '${Fmt.number(u)}원 단위',
                   selected: _s.roundUnit == u,
                   onTap: () {
                     HapticFeedback.lightImpact();
@@ -991,36 +1114,56 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
             ],
           ),
-          if (showPreview) ...[
+          if (!exact) ...[
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final m in RoundMode.values)
+                  _SelectChip(
+                    label: m.label,
+                    dense: true,
+                    selected: _s.roundMode == m,
+                    onTap: () {
+                      HapticFeedback.lightImpact();
+                      _update(() => _s.roundMode = m);
+                    },
+                  ),
+              ],
+            ),
+          ],
+          if (showPreview && !exact) ...[
             const SizedBox(height: 14),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               decoration: BoxDecoration(
-                color: context.colors.primaryLight,
+                color: short
+                    ? AppColors.danger.withValues(alpha: 0.10)
+                    : context.colors.primaryLight,
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.savings_outlined,
-                      size: 18, color: AppColors.primary),
+                  Icon(Icons.savings_outlined, size: 18, color: color),
                   const SizedBox(width: 8),
-                  const Expanded(
+                  Expanded(
                     child: Text(
-                      '지금 설정이면 총무 자투리',
+                      short ? '지금 설정이면 총무가 모자라요' : '지금 설정이면 총무 자투리',
                       style: TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w600,
-                        color: AppColors.primary,
+                        color: color,
                       ),
                     ),
                   ),
                   _AnimatedWon(
                     surplus,
-                    prefix: '+',
-                    style: const TextStyle(
+                    prefix: short ? '' : '+',
+                    style: TextStyle(
                       fontSize: 15,
                       fontWeight: FontWeight.w900,
-                      color: AppColors.primary,
+                      color: color,
                     ),
                   ),
                 ],
@@ -1029,6 +1172,64 @@ class _HomeScreenState extends State<HomeScreen> {
           ],
         ],
       ),
+    );
+  }
+}
+
+/// 차수 카드 우측 메뉴
+enum _RoundAction { up, down, duplicate, delete }
+
+class _RoundMenu extends StatelessWidget {
+  const _RoundMenu({
+    required this.index,
+    required this.count,
+    required this.onSelected,
+  });
+
+  final int index;
+  final int count;
+  final ValueChanged<_RoundAction> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    PopupMenuItem<_RoundAction> item(
+      _RoundAction value,
+      IconData icon,
+      String text, {
+      bool enabled = true,
+      bool danger = false,
+    }) {
+      final color = danger ? AppColors.danger : context.colors.text;
+      return PopupMenuItem(
+        value: value,
+        enabled: enabled,
+        child: Row(
+          children: [
+            Icon(icon, size: 20, color: enabled ? color : context.colors.hint),
+            const SizedBox(width: 10),
+            Text(
+              text,
+              style: TextStyle(color: enabled ? color : context.colors.hint),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return PopupMenuButton<_RoundAction>(
+      tooltip: '${index + 1}차 메뉴',
+      color: context.colors.card,
+      icon: Icon(Icons.more_vert_rounded, color: context.colors.subText),
+      onSelected: onSelected,
+      itemBuilder: (_) => [
+        item(_RoundAction.up, Icons.arrow_upward_rounded, '위로 이동',
+            enabled: index > 0),
+        item(_RoundAction.down, Icons.arrow_downward_rounded, '아래로 이동',
+            enabled: index < count - 1),
+        item(_RoundAction.duplicate, Icons.copy_rounded, '참석자 그대로 복제'),
+        item(_RoundAction.delete, Icons.delete_outline_rounded, '삭제',
+            danger: true),
+      ],
     );
   }
 }

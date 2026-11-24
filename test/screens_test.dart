@@ -48,6 +48,8 @@ void main() {
         await pumpScreen(tester, ReceiptScreen(settlement: s), mode);
         expect(find.text('입금 확인'), findsOneWidget);
         expect(find.text('1/4명'), findsOneWidget);
+        expect(find.text('바로 송금 링크 (선택)'), findsOneWidget);
+        expect(find.text('나중에 미입금 알림 받기'), findsOneWidget);
       });
 
       testWidgets('메인 화면 (할인·개별 추가·다른 결제자)', (tester) async {
@@ -58,10 +60,16 @@ void main() {
           ..payerId = s.members[2].id;
         r.soberIds.add(s.members[3].id);
         r.setExtra(s.members[1].id, 12000);
+        s.rounds[1]
+          ..freeMode = true
+          ..freeIds.add(s.members[0].id);
+        s.roundMode = RoundMode.nearest;
         await AppStorage.saveSettlement(s);
         await pumpScreen(tester, const HomeScreen(), mode);
         expect(find.text('술 안 마신 인원 30% 할인'), findsOneWidget);
         expect(find.text('민수 +12,000원'), findsOneWidget);
+        expect(find.text('면제 인원 (생일자 등)'), findsNWidgets(2));
+        expect(find.text('반올림'), findsOneWidget);
       });
 
       testWidgets('영수증 화면 (송금 정리)', (tester) async {
@@ -70,6 +78,12 @@ void main() {
         await pumpScreen(tester, ReceiptScreen(settlement: s), mode);
         expect(find.text('송금 확인'), findsOneWidget);
         expect(find.text('송금 정리'), findsOneWidget);
+        expect(find.text('받는 사람 계좌'), findsOneWidget);
+
+        // 영수증에서 이름을 누르면 개인별 상세
+        await tester.tap(find.text('지영').first);
+        await tester.pumpAndSettle();
+        expect(find.text('개인 메시지 복사'), findsOneWidget);
       });
 
       testWidgets('설정 화면 (화면 모드 선택)', (tester) async {
