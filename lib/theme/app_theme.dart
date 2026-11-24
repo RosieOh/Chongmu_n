@@ -106,7 +106,8 @@ class AppTheme {
       inputDecorationTheme: const InputDecorationTheme(
         isDense: true,
         border: InputBorder.none,
-        hintStyle: TextStyle(color: AppColors.hint, fontWeight: FontWeight.w500),
+        hintStyle:
+            TextStyle(color: AppColors.hint, fontWeight: FontWeight.w500),
       ),
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(

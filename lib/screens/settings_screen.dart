@@ -262,7 +262,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
 // ═════════════════════════════════════════════
 
 class _ProCard extends StatelessWidget {
-  const _ProCard({required this.isPro, required this.busy, required this.onBuy});
+  const _ProCard(
+      {required this.isPro, required this.busy, required this.onBuy});
 
   final bool isPro;
   final bool busy;
@@ -296,7 +297,8 @@ class _ProCard extends StatelessWidget {
           Row(
             children: [
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(8),
@@ -439,7 +441,8 @@ class _Tile extends StatelessWidget {
   Widget build(BuildContext context) {
     return ListTile(
       onTap: onTap,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppDecor.radius)),
+      shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppDecor.radius)),
       leading: Icon(icon, color: AppColors.primary),
       title: Text(
         title,

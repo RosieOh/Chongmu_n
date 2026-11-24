@@ -135,7 +135,8 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
     b.writeln();
     b.writeln('💸 1인별 입금액');
     for (final p in _results) {
-      b.writeln('· ${p.member.name}  ${Fmt.won(p.pay)}${_isPaid(p) ? ' ✅입금완료' : ''}');
+      b.writeln(
+          '· ${p.member.name}  ${Fmt.won(p.pay)}${_isPaid(p) ? ' ✅입금완료' : ''}');
     }
 
     final account = _accountLine();
@@ -179,7 +180,8 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
 
     // iPad 공유 시트 위치 (아이폰에선 무시됨)
     final box = buttonContext.findRenderObject() as RenderBox?;
-    final origin = box == null ? null : box.localToGlobal(Offset.zero) & box.size;
+    final origin =
+        box == null ? null : box.localToGlobal(Offset.zero) & box.size;
 
     // ───────── 🎬 보상형 광고 연동 위치 ─────────
     // TODO(AdMob 2단계): 무료 사용자는 RewardedAd 를 먼저 보여주고,
@@ -518,7 +520,8 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
                       style: ElevatedButton.styleFrom(
                         padding: const EdgeInsets.symmetric(horizontal: 10),
                       ),
-                      onPressed: _saving ? null : () => _saveImage(buttonContext),
+                      onPressed:
+                          _saving ? null : () => _saveImage(buttonContext),
                       icon: _saving
                           ? const SizedBox(
                               width: 18,
@@ -607,7 +610,8 @@ class _PaidRow extends StatelessWidget {
                   ),
                 ),
                 child: paid
-                    ? const Icon(Icons.check_rounded, size: 18, color: Colors.white)
+                    ? const Icon(Icons.check_rounded,
+                        size: 18, color: Colors.white)
                     : null,
               ),
               const SizedBox(width: 12),
@@ -933,7 +937,8 @@ class _ReceiptPaper extends StatelessWidget {
   Widget _roundRow(int i) {
     final r = settlement.rounds[i];
     final unit = settlement.roundUnit;
-    final detail = StringBuffer('${r.headCount}명 · 1인 ${Fmt.won(r.perPerson(unit))}');
+    final detail =
+        StringBuffer('${r.headCount}명 · 1인 ${Fmt.won(r.perPerson(unit))}');
     if (r.hasSober) {
       detail.write(' · 술X ${Fmt.won(r.soberPerPerson(unit))}');
     }

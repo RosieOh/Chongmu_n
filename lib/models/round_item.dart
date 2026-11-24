@@ -324,7 +324,8 @@ class Settlement {
   }
 
   /// 새 정산 (멤버만 유지)
-  factory Settlement.fresh({required List<Member> members, int roundUnit = 100}) {
+  factory Settlement.fresh(
+      {required List<Member> members, int roundUnit = 100}) {
     final s = Settlement(
       members: members.map((m) => m.copy()).toList(),
       rounds: [],
@@ -402,8 +403,10 @@ class AppStorage {
   static String get accountNumber => _prefs.getString(_kAccount) ?? '';
 
   static Future<void> setBankName(String v) => _prefs.setString(_kBank, v);
-  static Future<void> setAccountHolder(String v) => _prefs.setString(_kHolder, v);
-  static Future<void> setAccountNumber(String v) => _prefs.setString(_kAccount, v);
+  static Future<void> setAccountHolder(String v) =>
+      _prefs.setString(_kHolder, v);
+  static Future<void> setAccountNumber(String v) =>
+      _prefs.setString(_kAccount, v);
 
   static bool get isPro => _prefs.getBool(_kIsPro) ?? false;
   static Future<void> setPro(bool v) => _prefs.setBool(_kIsPro, v);

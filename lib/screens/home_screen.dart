@@ -67,7 +67,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
   TextEditingController _amountCtrl(RoundItem r) => _amountCtrls.putIfAbsent(
         r.id,
-        () => TextEditingController(text: r.amount > 0 ? Fmt.number(r.amount) : ''),
+        () => TextEditingController(
+            text: r.amount > 0 ? Fmt.number(r.amount) : ''),
       );
 
   TextEditingController _nameCtrl(RoundItem r) =>
@@ -383,8 +384,10 @@ class _HomeScreenState extends State<HomeScreen> {
                 hintText: '모임 이름 (예: 불금 팀 회식)',
                 counterText: '',
                 contentPadding: EdgeInsets.zero,
-                suffixIcon: Icon(Icons.edit_rounded, size: 16, color: AppColors.hint),
-                suffixIconConstraints: BoxConstraints(minWidth: 24, minHeight: 24),
+                suffixIcon:
+                    Icon(Icons.edit_rounded, size: 16, color: AppColors.hint),
+                suffixIconConstraints:
+                    BoxConstraints(minWidth: 24, minHeight: 24),
               ),
             ),
           ),
@@ -1083,7 +1086,8 @@ class _SelectChip extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               if (selected) ...[
-                const Icon(Icons.check_rounded, size: 15, color: AppColors.primary),
+                const Icon(Icons.check_rounded,
+                    size: 15, color: AppColors.primary),
                 const SizedBox(width: 3),
               ],
               Text(
@@ -1104,7 +1108,8 @@ class _SelectChip extends StatelessWidget {
 
 /// +1만, +3만 같은 원터치 금액 칩
 class _QuickChip extends StatelessWidget {
-  const _QuickChip({required this.label, required this.onTap, this.muted = false});
+  const _QuickChip(
+      {required this.label, required this.onTap, this.muted = false});
 
   final String label;
   final VoidCallback onTap;
@@ -1117,7 +1122,9 @@ class _QuickChip extends StatelessWidget {
         color: muted ? AppColors.cardBg : AppColors.background,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(10),
-          side: muted ? const BorderSide(color: AppColors.border) : BorderSide.none,
+          side: muted
+              ? const BorderSide(color: AppColors.border)
+              : BorderSide.none,
         ),
         child: InkWell(
           borderRadius: BorderRadius.circular(10),
@@ -1319,7 +1326,8 @@ class _ProBadgeButton extends StatelessWidget {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.settings_rounded, size: 20, color: AppColors.darkText),
+              const Icon(Icons.settings_rounded,
+                  size: 20, color: AppColors.darkText),
               const SizedBox(width: 6),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -1413,32 +1421,33 @@ class _BottomBar extends StatelessWidget {
                     icon: const Icon(Icons.receipt_long_rounded),
                     label: FittedBox(
                       child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Text(
-                          '정산 영수증 만들기',
-                          style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
-                        ),
-                        if (paidText != null) ...[
-                          const SizedBox(width: 8),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 8, vertical: 3),
-                            decoration: BoxDecoration(
-                              color: Colors.white.withValues(alpha: 0.22),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Text(
-                              paidText!,
-                              style: const TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w800,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Text(
+                            '정산 영수증 만들기',
+                            style: TextStyle(
+                                fontSize: 17, fontWeight: FontWeight.w800),
+                          ),
+                          if (paidText != null) ...[
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withValues(alpha: 0.22),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Text(
+                                paidText!,
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w800,
+                                ),
                               ),
                             ),
-                          ),
+                          ],
                         ],
-                      ],
-                    ),
+                      ),
                     ),
                   ),
                 ),
@@ -1500,8 +1509,10 @@ class _NameDialog extends StatefulWidget {
 }
 
 class _NameDialogState extends State<_NameDialog> {
-  late final TextEditingController _c = TextEditingController(text: widget.initial)
-    ..selection = TextSelection(baseOffset: 0, extentOffset: widget.initial.length);
+  late final TextEditingController _c =
+      TextEditingController(text: widget.initial)
+        ..selection =
+            TextSelection(baseOffset: 0, extentOffset: widget.initial.length);
 
   @override
   void dispose() {
@@ -1536,7 +1547,8 @@ class _NameDialogState extends State<_NameDialog> {
       actions: [
         if (widget.showDelete)
           TextButton(
-            onPressed: () => Navigator.of(context).pop(const _NameResult.remove()),
+            onPressed: () =>
+                Navigator.of(context).pop(const _NameResult.remove()),
             child: const Text('삭제', style: TextStyle(color: AppColors.danger)),
           ),
         TextButton(
@@ -1547,7 +1559,8 @@ class _NameDialogState extends State<_NameDialog> {
           onPressed: _submit,
           child: const Text(
             '저장',
-            style: TextStyle(color: AppColors.primary, fontWeight: FontWeight.w800),
+            style: TextStyle(
+                color: AppColors.primary, fontWeight: FontWeight.w800),
           ),
         ),
       ],
