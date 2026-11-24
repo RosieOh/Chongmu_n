@@ -50,6 +50,28 @@ void main() {
         expect(find.text('1/4명'), findsOneWidget);
       });
 
+      testWidgets('메인 화면 (할인·개별 추가·다른 결제자)', (tester) async {
+        final s = Settlement.sample()..isSample = false;
+        final r = s.rounds.first
+          ..soberDiscount = true
+          ..discountPercent = 30
+          ..payerId = s.members[2].id;
+        r.soberIds.add(s.members[3].id);
+        r.setExtra(s.members[1].id, 12000);
+        await AppStorage.saveSettlement(s);
+        await pumpScreen(tester, const HomeScreen(), mode);
+        expect(find.text('술 안 마신 인원 30% 할인'), findsOneWidget);
+        expect(find.text('민수 +12,000원'), findsOneWidget);
+      });
+
+      testWidgets('영수증 화면 (송금 정리)', (tester) async {
+        final s = Settlement.sample();
+        s.rounds[1].payerId = s.members[1].id;
+        await pumpScreen(tester, ReceiptScreen(settlement: s), mode);
+        expect(find.text('송금 확인'), findsOneWidget);
+        expect(find.text('송금 정리'), findsOneWidget);
+      });
+
       testWidgets('설정 화면 (화면 모드 선택)', (tester) async {
         await pumpScreen(tester, const SettingsScreen(), mode);
         expect(find.text('화면 모드'), findsOneWidget);
