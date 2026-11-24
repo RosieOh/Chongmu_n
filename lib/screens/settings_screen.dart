@@ -119,7 +119,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
           '새 정산을 시작할까요?',
           style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
         ),
-        content: const Text('멤버 목록은 그대로 두고, 차수와 금액만 비워요.'),
+        content: const Text(
+          '멤버 목록은 그대로 두고, 차수와 금액만 비워요.\n지금 정산은 \'지난 정산\'에 저장돼요.',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),

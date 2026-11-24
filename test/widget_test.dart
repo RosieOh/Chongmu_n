@@ -1,5 +1,6 @@
 import 'package:chongmu_n/models/round_item.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   test('예시 데이터: 1차 120,000원/4명 + 2차 64,000원/3명, 100원 올림', () {
@@ -48,5 +49,74 @@ void main() {
     // 가중치 합 3.8 → 술O 26,315.8 / 술X 21,052.6
     expect(r.perPerson(10), 26320);
     expect(r.soberPerPerson(10), 21060);
+  });
+
+  group('지난 정산 기록', () {
+    setUp(() async {
+      SharedPreferences.setMockInitialValues({});
+      await AppStorage.init();
+    });
+
+    test('예시 데이터는 기록에 저장하지 않음', () async {
+      await AppStorage.saveSettlement(Settlement.sample());
+      expect(AppStorage.loadHistory(), isEmpty);
+    });
+
+    test('금액이 0원인 새 정산은 저장하지 않고, 금액 입력 후 저장', () async {
+      final s = Settlement.blank();
+      await AppStorage.saveSettlement(s);
+      expect(AppStorage.loadHistory(), isEmpty);
+
+      s.rounds.first.amount = 80000;
+      await AppStorage.saveSettlement(s);
+      expect(AppStorage.loadHistory().single.id, s.id);
+
+      // 같은 정산을 다시 저장하면 새 항목이 아니라 갱신
+      s.title = '주말 등산';
+      await AppStorage.saveSettlement(s);
+      final history = AppStorage.loadHistory();
+      expect(history.length, 1);
+      expect(history.single.title, '주말 등산');
+    });
+
+    test('수정한 예시 데이터는 저장, 최신순 정렬, 앱 재시작 후에도 유지', () async {
+      final older = Settlement.sample()..isSample = false;
+      final newer = Settlement(
+        createdAt: older.createdAt.add(const Duration(days: 1)),
+        members: [Member(id: 'm1', name: '나')],
+        rounds: [
+          RoundItem(id: 'r1', amount: 10000, participantIds: {'m1'})
+        ],
+      );
+      await AppStorage.saveSettlement(older);
+      await AppStorage.saveSettlement(newer);
+
+      await AppStorage.init(); // 앱 재시작 흉내
+      final history = AppStorage.loadHistory();
+      expect(history.map((e) => e.id), [newer.id, older.id]);
+      expect(history.last.totalSpent, 184000);
+    });
+
+    test('삭제와 되돌리기', () async {
+      final s = Settlement.blank();
+      s.rounds.first.amount = 50000;
+      await AppStorage.saveSettlement(s);
+
+      final copy = AppStorage.historyById(s.id)!;
+      await AppStorage.deleteHistory(s.id);
+      expect(AppStorage.loadHistory(), isEmpty);
+
+      await AppStorage.restoreHistory(copy);
+      expect(AppStorage.historyById(s.id)?.totalSpent, 50000);
+    });
+
+    test('불러온 기록을 수정해도 저장본은 그대로 (복사본)', () async {
+      final s = Settlement.blank();
+      s.rounds.first.amount = 50000;
+      await AppStorage.saveSettlement(s);
+
+      AppStorage.historyById(s.id)!.rounds.first.amount = 1;
+      expect(AppStorage.historyById(s.id)!.totalSpent, 50000);
+    });
   });
 }

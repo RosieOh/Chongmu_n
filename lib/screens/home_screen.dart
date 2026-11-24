@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 
 import '../models/round_item.dart';
 import '../theme/app_theme.dart';
+import 'history_screen.dart';
 import 'receipt_screen.dart';
 import 'settings_screen.dart';
 
@@ -56,8 +57,16 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // ───────────────── 상태 변경 + 자동 저장 ─────────────────
 
+  /// 사용자가 정산 내용을 바꿀 때 사용 (예시 데이터 표시 해제 + 자동 저장)
   void _update(VoidCallback fn) {
-    setState(fn);
+    setState(() {
+      _s.isSample = false;
+      fn();
+    });
+    _scheduleSave();
+  }
+
+  void _scheduleSave() {
     _saveTimer?.cancel();
     _saveTimer = Timer(
       const Duration(milliseconds: 400),
@@ -74,15 +83,21 @@ class _HomeScreenState extends State<HomeScreen> {
   TextEditingController _nameCtrl(RoundItem r) =>
       _nameCtrls.putIfAbsent(r.id, () => TextEditingController(text: r.name));
 
+  /// 다른 정산으로 바꾸기 (새 정산 / 예시 / 지난 정산 불러오기)
+  /// 바꾸기 직전의 정산은 '지난 정산' 기록에 저장해 둡니다.
   void _replaceSettlement(Settlement next) {
+    _saveTimer?.cancel();
+    AppStorage.saveSettlement(_s);
+
     final old = [..._amountCtrls.values, ..._nameCtrls.values];
     _amountCtrls.clear();
     _nameCtrls.clear();
     _titleCtrl.text = next.title;
-    _update(() {
+    setState(() {
       _s = next;
       _autofocusRoundId = null;
     });
+    _scheduleSave();
     // 화면에서 완전히 떨어진 뒤 정리
     WidgetsBinding.instance.addPostFrameCallback((_) {
       for (final c in old) {
@@ -266,6 +281,26 @@ class _HomeScreenState extends State<HomeScreen> {
     return '입금 $paid/${results.length}명';
   }
 
+  Future<void> _openHistory() async {
+    HapticFeedback.lightImpact();
+    FocusScope.of(context).unfocus();
+    // 방금 입력한 내용까지 기록에 반영한 뒤 목록 열기
+    _saveTimer?.cancel();
+    await AppStorage.saveSettlement(_s);
+    if (!mounted) return;
+
+    final id = await Navigator.of(context).push<String>(
+      MaterialPageRoute(builder: (_) => HistoryScreen(currentId: _s.id)),
+    );
+    if (!mounted || id == null) return;
+    final picked = AppStorage.historyById(id);
+    if (picked == null) return;
+    _replaceSettlement(picked);
+    final title =
+        picked.title.trim().isEmpty ? '이름 없는 모임' : picked.title.trim();
+    _toast('"$title" 정산을 불러왔어요');
+  }
+
   Future<void> _openSettings() async {
     HapticFeedback.lightImpact();
     FocusScope.of(context).unfocus();
@@ -394,6 +429,11 @@ class _HomeScreenState extends State<HomeScreen> {
         ],
       ),
       actions: [
+        IconButton(
+          tooltip: '지난 정산',
+          onPressed: _openHistory,
+          icon: const Icon(Icons.history_rounded, color: AppColors.darkText),
+        ),
         _ProBadgeButton(isPro: isPro, onTap: _openSettings),
         const SizedBox(width: 12),
       ],
