@@ -280,10 +280,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
   /// 하단 버튼에 표시할 입금 진행 상황 (체크한 사람이 있을 때만)
   String? _paidProgressText() {
-    final results = _s.buildResults();
-    final paid = results.where((p) => _s.isPaid(p.member.id)).length;
+    final dues = _s.buildDues();
+    final paid = dues.where((d) => _s.isPaid(d.member.id)).length;
     if (paid == 0) return null;
-    return '입금 $paid/${results.length}명';
+    return '입금 $paid/${dues.length}명';
   }
 
   Future<void> _openHistory() async {
@@ -645,8 +645,10 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
             ],
           ),
+          const SizedBox(height: 12),
+          _buildPayerRow(r),
           const Padding(
-            padding: EdgeInsets.fromLTRB(0, 16, 8, 14),
+            padding: EdgeInsets.fromLTRB(0, 8, 8, 14),
             child: Divider(),
           ),
           // ── 참석 인원 ──
@@ -786,6 +788,74 @@ class _HomeScreenState extends State<HomeScreen> {
                 const SizedBox(height: 6),
                 _buildExtras(r, attendees),
               ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 이 차수를 결제한 사람 (기본: 총무)
+  Widget _buildPayerRow(RoundItem r) {
+    final payer = _s.payerOf(r);
+    return Padding(
+      padding: const EdgeInsets.only(right: 8),
+      child: Row(
+        children: [
+          Icon(Icons.credit_card_rounded,
+              size: 18, color: context.colors.subText),
+          const SizedBox(width: 6),
+          const Text('결제한 사람', style: _Txt.label),
+          const Spacer(),
+          PopupMenuButton<String>(
+            tooltip: '결제한 사람 선택',
+            initialValue: payer.id,
+            color: context.colors.card,
+            position: PopupMenuPosition.under,
+            onSelected: (id) {
+              HapticFeedback.lightImpact();
+              _update(() => r.payerId = id == _s.treasurer.id ? null : id);
+            },
+            itemBuilder: (_) => [
+              for (final m in _s.members)
+                PopupMenuItem(
+                  value: m.id,
+                  child: Text(
+                    m.name,
+                    style: TextStyle(
+                      color: context.colors.text,
+                      fontWeight:
+                          m.id == payer.id ? FontWeight.w800 : FontWeight.w500,
+                    ),
+                  ),
+                ),
+            ],
+            child: Container(
+              padding: const EdgeInsets.fromLTRB(12, 6, 6, 6),
+              decoration: BoxDecoration(
+                color: context.colors.background,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 140),
+                    child: Text(
+                      payer.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: context.colors.text,
+                      ),
+                    ),
+                  ),
+                  Icon(Icons.arrow_drop_down_rounded,
+                      color: context.colors.subText),
+                ],
+              ),
             ),
           ),
         ],

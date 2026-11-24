@@ -201,7 +201,8 @@ class _HistoryCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final s = settlement;
     final results = s.buildResults();
-    final paid = results.where((p) => s.isPaid(p.member.id)).length;
+    final dues = s.buildDues(results);
+    final paid = dues.where((d) => s.isPaid(d.member.id)).length;
     final roundCount = s.rounds.where((r) => r.amount > 0).length;
     final places = s.rounds
         .where((r) => r.amount > 0 && r.name.trim().isNotEmpty)
@@ -313,7 +314,7 @@ class _HistoryCard extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 4),
-                    _paidTag(context, paid, results.length),
+                    _paidTag(context, paid, dues.length),
                   ],
                 ),
               ],

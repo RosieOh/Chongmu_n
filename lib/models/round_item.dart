@@ -65,6 +65,7 @@ class RoundItem {
     Set<String>? soberIds,
     int discountPercent = defaultDiscount,
     Map<String, int>? extras,
+    this.payerId,
   })  : extras = extras ?? <String, int>{},
         discountPercent = discountOptions.contains(discountPercent)
             ? discountPercent
@@ -94,6 +95,9 @@ class RoundItem {
 
   /// 술 안 마신 사람이 내는 비율 (20% 할인 → 0.8)
   double get soberRate => (100 - discountPercent) / 100;
+
+  /// 이 차수를 실제로 결제한 멤버 ID (null 이면 총무 = 첫 번째 멤버)
+  String? payerId;
 
   /// 개별 추가 금액 (멤버 ID → 금액). 혼자 시킨 메뉴처럼 그 사람만 내는 돈.
   /// 결제 금액에서 추가금을 먼저 빼고, 남은 금액을 N빵합니다.
@@ -168,6 +172,7 @@ class RoundItem {
         'soberIds': soberIds.toList(),
         'discountPercent': discountPercent,
         'extras': Map<String, int>.of(extras),
+        if (payerId != null) 'payerId': payerId,
       };
 
   factory RoundItem.fromJson(Map<String, dynamic> json) {
@@ -193,6 +198,7 @@ class RoundItem {
       discountPercent:
           (json['discountPercent'] as num?)?.toInt() ?? defaultDiscount,
       extras: extras,
+      payerId: json['payerId'] as String?,
     );
   }
 }
@@ -219,6 +225,46 @@ class PersonResult {
 
   /// 최종 입금액 (단위 올림 적용)
   final int pay;
+}
+
+// ─────────────────────────────────────────────
+// 송금 정리 (여러 명이 나눠 결제했을 때)
+// ─────────────────────────────────────────────
+
+/// A → B 에게 amount 원 보내기
+class Transfer {
+  const Transfer({
+    required this.from,
+    required this.to,
+    required this.amount,
+  });
+
+  final Member from;
+  final Member to;
+  final int amount;
+}
+
+/// 송금 정리 계산용 (남은 금액)
+class _Balance {
+  _Balance(this.member, this.left);
+
+  final Member member;
+  int left;
+}
+
+/// 한 사람이 보내야 할 돈 (입금 확인 단위)
+class Due {
+  const Due({
+    required this.member,
+    required this.amount,
+    this.transfers = const [],
+  });
+
+  final Member member;
+  final int amount;
+
+  /// 송금 정리 모드에서 누구에게 얼마씩 보내는지
+  final List<Transfer> transfers;
 }
 
 // ─────────────────────────────────────────────
@@ -305,7 +351,89 @@ class Settlement {
     paidIds.remove(memberId);
     for (final r in rounds) {
       r.removeParticipant(memberId);
+      if (r.payerId == memberId) r.payerId = null;
     }
+  }
+
+  // ── 결제자 / 송금 정리 ──
+
+  /// 총무 (첫 번째 멤버). 자투리 잔액을 갖고, 기본 결제자예요.
+  Member get treasurer => members.first;
+
+  Member memberById(String id) =>
+      members.firstWhere((m) => m.id == id, orElse: () => treasurer);
+
+  /// 이 차수를 결제한 멤버 (지정이 없거나 삭제된 멤버면 총무)
+  Member payerOf(RoundItem r) {
+    final id = r.payerId;
+    if (id == null) return treasurer;
+    return memberById(id);
+  }
+
+  /// 총무 말고 다른 사람이 결제한 차수가 있으면 '송금 정리' 모드
+  bool get usesTransfers =>
+      rounds.any((r) => r.amount > 0 && payerOf(r).id != treasurer.id);
+
+  /// 누가 누구에게 얼마 보내면 되는지 (송금 횟수가 적도록 큰 금액부터 짝지음).
+  /// 올림으로 생긴 자투리는 총무가 받아요.
+  List<Transfer> buildTransfers([List<PersonResult>? results]) {
+    final res = results ?? buildResults();
+    final net = <String, int>{for (final m in members) m.id: 0};
+    for (final p in res) {
+      net[p.member.id] = net[p.member.id]! + p.pay;
+    }
+    for (final r in rounds) {
+      if (r.amount <= 0) continue;
+      final id = payerOf(r).id;
+      net[id] = net[id]! - r.amount;
+    }
+    // 자투리(걷는 돈 - 실제 지출)는 총무 몫
+    final rest = net.values.fold(0, (a, b) => a + b);
+    net[treasurer.id] = net[treasurer.id]! - rest;
+
+    final debtors = [
+      for (final m in members)
+        if (net[m.id]! > 0) _Balance(m, net[m.id]!)
+    ]..sort((a, b) => b.left.compareTo(a.left));
+    final creditors = [
+      for (final m in members)
+        if (net[m.id]! < 0) _Balance(m, -net[m.id]!)
+    ]..sort((a, b) => b.left.compareTo(a.left));
+
+    final out = <Transfer>[];
+    var i = 0, j = 0;
+    while (i < debtors.length && j < creditors.length) {
+      final d = debtors[i], c = creditors[j];
+      final x = math.min(d.left, c.left);
+      out.add(Transfer(from: d.member, to: c.member, amount: x));
+      d.left -= x;
+      c.left -= x;
+      if (d.left == 0) i++;
+      if (c.left == 0) j++;
+    }
+    return out;
+  }
+
+  /// 입금 확인 목록.
+  /// - 총무 혼자 결제: 참석한 모든 사람이 총무에게 자기 몫을 냄
+  /// - 여러 명 결제: 송금 정리에서 돈을 보내야 하는 사람만
+  List<Due> buildDues([List<PersonResult>? results]) {
+    final res = results ?? buildResults();
+    if (!usesTransfers) {
+      return [for (final p in res) Due(member: p.member, amount: p.pay)];
+    }
+    final transfers = buildTransfers(res);
+    return [
+      for (final m in members)
+        if (transfers.any((t) => t.from.id == m.id))
+          Due(
+            member: m,
+            amount: transfers
+                .where((t) => t.from.id == m.id)
+                .fold(0, (sum, t) => sum + t.amount),
+            transfers: transfers.where((t) => t.from.id == m.id).toList(),
+          ),
+    ];
   }
 
   /// 새 차수 (기본값: 모든 멤버 참석)

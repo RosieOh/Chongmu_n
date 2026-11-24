@@ -33,6 +33,11 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
 
   late final List<PersonResult> _results = widget.settlement.buildResults();
 
+  /// 입금 확인 대상 (총무 혼자 결제면 전원, 여러 명 결제면 송금할 사람만)
+  late final List<Due> _dues = widget.settlement.buildDues(_results);
+
+  late final bool _transferMode = widget.settlement.usesTransfers;
+
   final FocusNode _bankFocus = FocusNode();
   final FocusNode _accountFocus = FocusNode();
 
@@ -64,12 +69,14 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
 
   // ───────────────── 입금 확인 ─────────────────
 
-  bool _isPaid(PersonResult p) => widget.settlement.isPaid(p.member.id);
+  bool _isPaid(Due d) => widget.settlement.isPaid(d.member.id);
 
-  void _togglePaid(PersonResult p) {
+  bool _isMemberPaid(String id) => widget.settlement.isPaid(id);
+
+  void _togglePaid(Due d) {
     final s = widget.settlement;
-    final nowPaid = s.togglePaid(p.member.id);
-    final allPaid = _results.every(_isPaid);
+    final nowPaid = s.togglePaid(d.member.id);
+    final allPaid = _dues.every(_isPaid);
     if (nowPaid && allPaid) {
       HapticFeedback.mediumImpact();
       _toast('🎉 모두 입금 완료! 수고했어요, 총무님');
@@ -87,8 +94,14 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
       ..writeln('📢 [$title] 정산 입금 안내')
       ..writeln('아직 입금 확인이 안 된 분들이에요 🙏')
       ..writeln();
-    for (final p in _results.where((p) => !_isPaid(p))) {
-      b.writeln('· ${p.member.name}  ${Fmt.won(p.pay)}');
+    for (final d in _dues.where((d) => !_isPaid(d))) {
+      if (_transferMode) {
+        for (final t in d.transfers) {
+          b.writeln('· ${t.from.name} → ${t.to.name}  ${Fmt.won(t.amount)}');
+        }
+      } else {
+        b.writeln('· ${d.member.name}  ${Fmt.won(d.amount)}');
+      }
     }
     final account = _accountLine();
     if (account.isNotEmpty) {
@@ -129,20 +142,37 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
     for (var i = 0; i < s.rounds.length; i++) {
       final r = s.rounds[i];
       if (r.amount <= 0) continue;
-      b.writeln('· ${s.roundLabel(i)}  ${Fmt.won(r.amount)} (${r.headCount}명)');
+      final payer = _transferMode ? ' · ${s.payerOf(r).name} 결제' : '';
+      b.writeln(
+          '· ${s.roundLabel(i)}  ${Fmt.won(r.amount)} (${r.headCount}명$payer)');
     }
     b.writeln('= 총 ${Fmt.won(s.totalSpent)}');
     b.writeln();
-    b.writeln('💸 1인별 입금액');
-    for (final p in _results) {
-      b.writeln(
-          '· ${p.member.name}  ${Fmt.won(p.pay)}${_isPaid(p) ? ' ✅입금완료' : ''}');
+    if (_transferMode) {
+      b.writeln('💸 1인별 부담액');
+      for (final p in _results) {
+        b.writeln('· ${p.member.name}  ${Fmt.won(p.pay)}');
+      }
+      b.writeln();
+      b.writeln('🔁 송금 정리');
+      for (final d in _dues) {
+        for (final t in d.transfers) {
+          b.writeln('· ${t.from.name} → ${t.to.name}  ${Fmt.won(t.amount)}'
+              '${_isPaid(d) ? ' ✅완료' : ''}');
+        }
+      }
+    } else {
+      b.writeln('💸 1인별 입금액');
+      for (final p in _results) {
+        b.writeln('· ${p.member.name}  ${Fmt.won(p.pay)}'
+            '${_isMemberPaid(p.member.id) ? ' ✅입금완료' : ''}');
+      }
     }
 
     final account = _accountLine();
     if (account.isNotEmpty) {
       b.writeln();
-      b.writeln('🏦 입금 계좌');
+      b.writeln(_transferMode ? '🏦 ${s.treasurer.name} 계좌' : '🏦 입금 계좌');
       b.writeln(account);
     }
 
@@ -260,6 +290,9 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
                           child: _ReceiptPaper(
                             settlement: widget.settlement,
                             results: _results,
+                            transfers: _transferMode
+                                ? [for (final d in _dues) ...d.transfers]
+                                : const [],
                             date: _now,
                             accountLine: _accountLine(),
                             showWatermark: !isPro,
@@ -283,12 +316,13 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
   }
 
   Widget _buildPaymentCard() {
-    final total = Settlement.totalCollected(_results);
-    final paid = _results.where(_isPaid).toList();
-    final received = Settlement.totalCollected(paid);
+    int sum(Iterable<Due> list) => list.fold(0, (a, d) => a + d.amount);
+    final total = sum(_dues);
+    final paid = _dues.where(_isPaid).toList();
+    final received = sum(paid);
     final remain = total - received;
-    final allPaid = paid.length == _results.length;
-    final progress = _results.isEmpty ? 0.0 : paid.length / _results.length;
+    final allPaid = paid.length == _dues.length;
+    final progress = _dues.isEmpty ? 1.0 : paid.length / _dues.length;
 
     return Container(
       decoration: AppDecor.card(context),
@@ -302,7 +336,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
                   color: AppColors.primary, size: 20),
               const SizedBox(width: 8),
               Text(
-                '입금 확인',
+                _transferMode ? '송금 확인' : '입금 확인',
                 style: TextStyle(
                   fontSize: 15,
                   fontWeight: FontWeight.w800,
@@ -311,7 +345,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
               ),
               const Spacer(),
               Text(
-                '${paid.length}/${_results.length}명',
+                '${paid.length}/${_dues.length}명',
                 style: const TextStyle(
                   fontSize: 15,
                   fontWeight: FontWeight.w900,
@@ -322,7 +356,11 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
           ),
           const SizedBox(height: 4),
           Text(
-            allPaid ? '🎉 모두 입금 완료! 수고했어요, 총무님' : '입금한 사람을 눌러서 체크하세요',
+            allPaid
+                ? '🎉 모두 입금 완료! 수고했어요, 총무님'
+                : _transferMode
+                    ? '여러 명이 나눠 결제해서, 아래처럼 보내면 끝나요'
+                    : '입금한 사람을 눌러서 체크하세요',
             style: TextStyle(
               fontSize: 12,
               fontWeight: allPaid ? FontWeight.w700 : FontWeight.w500,
@@ -371,12 +409,17 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
             padding: EdgeInsets.only(top: 12, bottom: 4),
             child: Divider(),
           ),
-          for (final p in _results)
+          for (final d in _dues)
             _PaidRow(
-              name: p.member.name,
-              amount: p.pay,
-              paid: _isPaid(p),
-              onTap: () => _togglePaid(p),
+              name: d.member.name,
+              amount: d.amount,
+              detail: _transferMode
+                  ? d.transfers
+                      .map((t) => '→ ${t.to.name} ${Fmt.won(t.amount)}')
+                      .join(' · ')
+                  : null,
+              paid: _isPaid(d),
+              onTap: () => _togglePaid(d),
             ),
           if (!allPaid) ...[
             const SizedBox(height: 8),
@@ -626,11 +669,15 @@ class _PaidRow extends StatelessWidget {
     required this.amount,
     required this.paid,
     required this.onTap,
+    this.detail,
   });
 
   final String name;
   final int amount;
   final bool paid;
+
+  /// 송금 정리 모드: '→ 지영 30,000원' 처럼 받는 사람 표시
+  final String? detail;
   final VoidCallback onTap;
 
   @override
@@ -664,13 +711,27 @@ class _PaidRow extends StatelessWidget {
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: Text(
-                  name,
-                  style: TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                    color: paid ? context.colors.subText : context.colors.text,
-                  ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      name,
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                        color:
+                            paid ? context.colors.subText : context.colors.text,
+                      ),
+                    ),
+                    if (detail != null)
+                      Text(
+                        detail!,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: context.colors.subText,
+                        ),
+                      ),
+                  ],
                 ),
               ),
               if (paid) ...[
@@ -775,6 +836,7 @@ class _ReceiptPaper extends StatelessWidget {
   const _ReceiptPaper({
     required this.settlement,
     required this.results,
+    required this.transfers,
     required this.date,
     required this.accountLine,
     required this.showWatermark,
@@ -782,6 +844,9 @@ class _ReceiptPaper extends StatelessWidget {
 
   final Settlement settlement;
   final List<PersonResult> results;
+
+  /// 송금 정리 (여러 명이 결제했을 때만)
+  final List<Transfer> transfers;
   final DateTime date;
   final String accountLine;
   final bool showWatermark;
@@ -881,10 +946,26 @@ class _ReceiptPaper extends StatelessWidget {
             const _DashedLine(),
 
             // ── 인원별 입금액 ──
-            Text('인원별 입금액', style: _section),
+            Text(transfers.isEmpty ? '인원별 입금액' : '인원별 부담액', style: _section),
             const SizedBox(height: 8),
             for (final p in results) _personRow(p),
             const _DashedLine(),
+
+            // ── 송금 정리 ──
+            if (transfers.isNotEmpty) ...[
+              Text('송금 정리', style: _section),
+              const SizedBox(height: 8),
+              for (final t in transfers)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: _row(
+                    '${t.from.name} → ${t.to.name}',
+                    Fmt.won(t.amount),
+                    _body,
+                  ),
+                ),
+              const _DashedLine(),
+            ],
 
             // ── 합계 / 자투리 ──
             _row('총 걷는 금액', Fmt.won(collected), _body),
@@ -995,6 +1076,9 @@ class _ReceiptPaper extends StatelessWidget {
     }
     if (r.extras.isNotEmpty) {
       detail.write(' · 개별 추가 ${Fmt.won(r.extrasTotal)}');
+    }
+    if (transfers.isNotEmpty) {
+      detail.write(' · ${settlement.payerOf(r).name} 결제');
     }
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),

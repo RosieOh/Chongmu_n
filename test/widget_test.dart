@@ -105,6 +105,56 @@ void main() {
     expect(r.sharedAmount, 0);
   });
 
+  group('결제자 지정 / 송금 정리', () {
+    test('총무 혼자 결제하면 기존처럼 전원이 총무에게 입금', () {
+      final s = Settlement.sample();
+      expect(s.usesTransfers, isFalse);
+      final dues = s.buildDues();
+      expect(dues.length, 4);
+      expect(dues.first.amount, 51400);
+    });
+
+    test('2차를 민수가 결제: 송금 정리 + 자투리는 총무 몫', () {
+      final s = Settlement.sample();
+      final me = s.members[0], minsu = s.members[1];
+      s.rounds[1].payerId = minsu.id; // 호프집 64,000원
+      expect(s.usesTransfers, isTrue);
+
+      // 부담액: 나 51,400 / 민수 51,400 / 지영 51,400 / 현우 30,000 (합 184,200)
+      // 결제액: 나 120,000 / 민수 64,000 → 민수는 12,600 받아야 함
+      final transfers = s.buildTransfers();
+      final received = <String, int>{};
+      final sent = <String, int>{};
+      for (final t in transfers) {
+        expect(t.amount, greaterThan(0));
+        expect(t.from.id, isNot(t.to.id));
+        received[t.to.id] = (received[t.to.id] ?? 0) + t.amount;
+        sent[t.from.id] = (sent[t.from.id] ?? 0) + t.amount;
+      }
+      expect(received[minsu.id], 12600);
+      // 총무는 120,000 - 51,400 + 자투리 200 = 68,800 받음
+      expect(received[me.id], 68800);
+      expect(sent.values.fold(0, (a, b) => a + b), 81400);
+
+      // 입금 확인은 돈을 보내는 지영·현우만
+      final dues = s.buildDues();
+      expect(dues.map((d) => d.member.name).toSet(), {'지영', '현우'});
+      expect(dues.fold(0, (a, d) => a + d.amount), 81400);
+    });
+
+    test('결제자 저장/불러오기, 결제자 삭제 시 총무로 되돌림', () {
+      final s = Settlement.sample();
+      final minsu = s.members[1];
+      s.rounds[1].payerId = minsu.id;
+      final restored = Settlement.fromJson(s.toJson());
+      expect(restored.payerOf(restored.rounds[1]).name, '민수');
+
+      s.removeMember(minsu.id);
+      expect(s.rounds[1].payerId, isNull);
+      expect(s.usesTransfers, isFalse);
+    });
+  });
+
   group('지난 정산 기록', () {
     setUp(() async {
       SharedPreferences.setMockInitialValues({});
