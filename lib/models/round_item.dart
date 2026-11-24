@@ -519,9 +519,13 @@ class Settlement {
   }
 
   /// 새 정산 (멤버만 유지)
-  factory Settlement.fresh(
-      {required List<Member> members, int roundUnit = 100}) {
+  factory Settlement.fresh({
+    required List<Member> members,
+    int roundUnit = 100,
+    String title = '',
+  }) {
     final s = Settlement(
+      title: title,
       members: members.map((m) => m.copy()).toList(),
       rounds: [],
       roundUnit: roundUnit,

@@ -302,15 +302,24 @@ class _HomeScreenState extends State<HomeScreen> {
     await AppStorage.saveSettlement(_s);
     if (!mounted) return;
 
-    final id = await Navigator.of(context).push<String>(
+    final pick = await Navigator.of(context).push<HistoryPick>(
       MaterialPageRoute(builder: (_) => HistoryScreen(currentId: _s.id)),
     );
-    if (!mounted || id == null) return;
-    final picked = AppStorage.historyById(id);
+    if (!mounted || pick == null) return;
+    final picked = AppStorage.historyById(pick.id);
     if (picked == null) return;
-    _replaceSettlement(picked);
     final title =
         picked.title.trim().isEmpty ? '이름 없는 모임' : picked.title.trim();
+    if (pick.asNew) {
+      _replaceSettlement(Settlement.fresh(
+        members: picked.members,
+        roundUnit: picked.roundUnit,
+        title: picked.title,
+      ));
+      _toast('"$title" 멤버로 새 정산을 시작했어요');
+      return;
+    }
+    _replaceSettlement(picked);
     _toast('"$title" 정산을 불러왔어요');
   }
 

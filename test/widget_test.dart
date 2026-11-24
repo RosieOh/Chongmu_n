@@ -1,4 +1,5 @@
 import 'package:chongmu_n/models/round_item.dart';
+import 'package:chongmu_n/screens/history_screen.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -103,6 +104,26 @@ void main() {
     r.setExtra(s.members[0].id, 999999);
     expect(r.extrasOverflow, isTrue);
     expect(r.sharedAmount, 0);
+  });
+
+  test('지난 정산 검색: 모임·멤버·장소 이름, 대소문자 무시', () {
+    final s = Settlement.sample()..title = 'Friday 회식';
+    expect(matchesHistoryQuery(s, ''), isTrue);
+    expect(matchesHistoryQuery(s, 'friday'), isTrue);
+    expect(matchesHistoryQuery(s, '지영'), isTrue);
+    expect(matchesHistoryQuery(s, '호프'), isTrue);
+    expect(matchesHistoryQuery(s, '노래방'), isFalse);
+  });
+
+  test('이 멤버로 새 정산: 제목·멤버 유지, 금액·입금 초기화', () {
+    final s = Settlement.sample()..togglePaid('x');
+    final next =
+        Settlement.fresh(members: s.members, roundUnit: 1000, title: s.title);
+    expect(next.id, isNot(s.id));
+    expect(next.title, '불금 팀 회식');
+    expect(next.members.map((m) => m.name), s.members.map((m) => m.name));
+    expect(next.totalSpent, 0);
+    expect(next.roundUnit, 1000);
   });
 
   group('결제자 지정 / 송금 정리', () {

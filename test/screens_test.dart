@@ -87,6 +87,11 @@ void main() {
         await AppStorage.saveSettlement(s);
         await pumpScreen(tester, HistoryScreen(currentId: s.id), mode);
         expect(find.text('주말 등산'), findsOneWidget);
+        expect(find.text('정산 횟수'), findsOneWidget);
+
+        await tester.enterText(find.byType(TextField), '없는모임');
+        await tester.pumpAndSettle();
+        expect(find.text('"없는모임" 검색 결과가 없어요'), findsOneWidget);
       });
     });
   }
