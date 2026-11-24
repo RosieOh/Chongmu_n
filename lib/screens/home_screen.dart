@@ -220,9 +220,17 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _addMember() async {
     HapticFeedback.lightImpact();
+    final current = _s.members.map((m) => m.name.trim()).toSet();
+    final suggestions = AppStorage.recentMemberNames()
+        .where((n) => !current.contains(n))
+        .toList();
     final res = await showDialog<_NameResult>(
       context: context,
-      builder: (_) => const _NameDialog(title: '멤버 추가', initial: ''),
+      builder: (_) => _NameDialog(
+        title: '멤버 추가',
+        initial: '',
+        suggestions: suggestions,
+      ),
     );
     if (res == null || res.delete || !mounted) return;
     _update(() => _s.addMember(res.name));
@@ -264,6 +272,11 @@ class _HomeScreenState extends State<HomeScreen> {
       _toast('참석 인원을 선택해 주세요');
       return;
     }
+    final overflow = _s.rounds.indexWhere((r) => r.extrasOverflow);
+    if (overflow >= 0) {
+      _toast('${overflow + 1}차의 개별 추가 금액이 결제 금액보다 커요');
+      return;
+    }
     await AppStorage.saveSettlement(_s);
     if (!mounted) return;
     await Navigator.of(context).push(
@@ -275,10 +288,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
   /// 하단 버튼에 표시할 입금 진행 상황 (체크한 사람이 있을 때만)
   String? _paidProgressText() {
-    final results = _s.buildResults();
-    final paid = results.where((p) => _s.isPaid(p.member.id)).length;
+    final dues = _s.buildDues();
+    final paid = dues.where((d) => _s.isPaid(d.member.id)).length;
     if (paid == 0) return null;
-    return '입금 $paid/${results.length}명';
+    return '입금 $paid/${dues.length}명';
   }
 
   Future<void> _openHistory() async {
@@ -289,15 +302,24 @@ class _HomeScreenState extends State<HomeScreen> {
     await AppStorage.saveSettlement(_s);
     if (!mounted) return;
 
-    final id = await Navigator.of(context).push<String>(
+    final pick = await Navigator.of(context).push<HistoryPick>(
       MaterialPageRoute(builder: (_) => HistoryScreen(currentId: _s.id)),
     );
-    if (!mounted || id == null) return;
-    final picked = AppStorage.historyById(id);
+    if (!mounted || pick == null) return;
+    final picked = AppStorage.historyById(pick.id);
     if (picked == null) return;
-    _replaceSettlement(picked);
     final title =
         picked.title.trim().isEmpty ? '이름 없는 모임' : picked.title.trim();
+    if (pick.asNew) {
+      _replaceSettlement(Settlement.fresh(
+        members: picked.members,
+        roundUnit: picked.roundUnit,
+        title: picked.title,
+      ));
+      _toast('"$title" 멤버로 새 정산을 시작했어요');
+      return;
+    }
+    _replaceSettlement(picked);
     _toast('"$title" 정산을 불러왔어요');
   }
 
@@ -305,7 +327,7 @@ class _HomeScreenState extends State<HomeScreen> {
     HapticFeedback.lightImpact();
     FocusScope.of(context).unfocus();
     final action = await Navigator.of(context).push<SettingsAction>(
-      MaterialPageRoute(builder: (_) => const SettingsScreen()),
+      MaterialPageRoute(builder: (_) => SettingsScreen(current: _s)),
     );
     if (!mounted || action == null) return;
     switch (action) {
@@ -640,8 +662,10 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
             ],
           ),
+          const SizedBox(height: 12),
+          _buildPayerRow(r),
           const Padding(
-            padding: EdgeInsets.fromLTRB(0, 16, 8, 14),
+            padding: EdgeInsets.fromLTRB(0, 8, 8, 14),
             child: Divider(),
           ),
           // ── 참석 인원 ──
@@ -698,8 +722,11 @@ class _HomeScreenState extends State<HomeScreen> {
                     Icon(Icons.local_drink_outlined,
                         size: 18, color: context.colors.subText),
                     const SizedBox(width: 6),
-                    const Expanded(
-                      child: Text('술 안 마신 인원 20% 할인', style: _Txt.label),
+                    Expanded(
+                      child: Text(
+                        '술 안 마신 인원 ${r.discountPercent}% 할인',
+                        style: _Txt.label,
+                      ),
                     ),
                     Switch.adaptive(
                       value: r.soberDiscount,
@@ -721,10 +748,36 @@ class _HomeScreenState extends State<HomeScreen> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             const SizedBox(height: 4),
+                            Row(
+                              children: [
+                                Text('할인율', style: _Txt.caption(context)),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Wrap(
+                                    spacing: 6,
+                                    runSpacing: 6,
+                                    children: [
+                                      for (final p in RoundItem.discountOptions)
+                                        _SelectChip(
+                                          label: '$p%',
+                                          dense: true,
+                                          selected: r.discountPercent == p,
+                                          onTap: () {
+                                            HapticFeedback.lightImpact();
+                                            _update(
+                                                () => r.discountPercent = p);
+                                          },
+                                        ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 10),
                             Text(
                               r.soberIds.isEmpty
                                   ? '👇 술 안 마신 사람을 눌러 주세요'
-                                  : '술 안 마신 사람 ${r.soberIds.length}명은 20% 덜 내요',
+                                  : '술 안 마신 사람 ${r.soberIds.length}명은 ${r.discountPercent}% 덜 내요',
                               style: r.soberIds.isEmpty
                                   ? const TextStyle(
                                       fontSize: 12,
@@ -749,12 +802,161 @@ class _HomeScreenState extends State<HomeScreen> {
                           ],
                         ),
                 ),
+                const SizedBox(height: 6),
+                _buildExtras(r, attendees),
               ],
             ),
           ),
         ],
       ),
     );
+  }
+
+  /// 이 차수를 결제한 사람 (기본: 총무)
+  Widget _buildPayerRow(RoundItem r) {
+    final payer = _s.payerOf(r);
+    return Padding(
+      padding: const EdgeInsets.only(right: 8),
+      child: Row(
+        children: [
+          Icon(Icons.credit_card_rounded,
+              size: 18, color: context.colors.subText),
+          const SizedBox(width: 6),
+          const Text('결제한 사람', style: _Txt.label),
+          const Spacer(),
+          PopupMenuButton<String>(
+            tooltip: '결제한 사람 선택',
+            initialValue: payer.id,
+            color: context.colors.card,
+            position: PopupMenuPosition.under,
+            onSelected: (id) {
+              HapticFeedback.lightImpact();
+              _update(() => r.payerId = id == _s.treasurer.id ? null : id);
+            },
+            itemBuilder: (_) => [
+              for (final m in _s.members)
+                PopupMenuItem(
+                  value: m.id,
+                  child: Text(
+                    m.name,
+                    style: TextStyle(
+                      color: context.colors.text,
+                      fontWeight:
+                          m.id == payer.id ? FontWeight.w800 : FontWeight.w500,
+                    ),
+                  ),
+                ),
+            ],
+            child: Container(
+              padding: const EdgeInsets.fromLTRB(12, 6, 6, 6),
+              decoration: BoxDecoration(
+                color: context.colors.background,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 140),
+                    child: Text(
+                      payer.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: context.colors.text,
+                      ),
+                    ),
+                  ),
+                  Icon(Icons.arrow_drop_down_rounded,
+                      color: context.colors.subText),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 개별 추가 금액 (혼자 시킨 메뉴 등)
+  Widget _buildExtras(RoundItem r, List<Member> attendees) {
+    final withExtra = attendees.where((m) => r.extraOf(m.id) > 0).toList();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(Icons.add_card_rounded,
+                size: 18, color: context.colors.subText),
+            const SizedBox(width: 6),
+            const Expanded(child: Text('개별 추가 금액', style: _Txt.label)),
+            TextButton.icon(
+              onPressed: () => _editExtra(r),
+              style: TextButton.styleFrom(
+                foregroundColor: AppColors.primary,
+                visualDensity: VisualDensity.compact,
+              ),
+              icon: const Icon(Icons.add_rounded, size: 18),
+              label: const Text(
+                '추가',
+                style: TextStyle(fontWeight: FontWeight.w800),
+              ),
+            ),
+          ],
+        ),
+        if (withExtra.isEmpty)
+          Text(
+            '혼자 시킨 메뉴가 있으면 그 사람만 따로 내게 할 수 있어요',
+            style: _Txt.caption(context),
+          )
+        else ...[
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final m in withExtra)
+                _PillButton(
+                  label: '${m.name} +${Fmt.won(r.extraOf(m.id))}',
+                  icon: Icons.edit_rounded,
+                  onTap: () => _editExtra(r, m),
+                ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            r.extrasOverflow
+                ? '⚠️ 추가 금액 합계가 결제 금액보다 커요'
+                : '추가 ${Fmt.won(r.extrasTotal)}을 뺀 ${Fmt.won(r.sharedAmount)}을 나눠요',
+            style: r.extrasOverflow
+                ? const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.danger,
+                  )
+                : _Txt.caption(context),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Future<void> _editExtra(RoundItem r, [Member? member]) async {
+    HapticFeedback.lightImpact();
+    FocusScope.of(context).unfocus();
+    final attendees =
+        _s.members.where((m) => r.participantIds.contains(m.id)).toList();
+    final res = await showDialog<_ExtraResult>(
+      context: context,
+      builder: (_) => _ExtraDialog(
+        members: attendees,
+        initialMemberId: member?.id,
+        initialAmount: member == null ? 0 : r.extraOf(member.id),
+      ),
+    );
+    if (res == null || !mounted) return;
+    _update(() => r.setExtra(res.memberId, res.amount));
   }
 
   Widget _buildRoundingCard() {
@@ -1095,11 +1297,15 @@ class _SelectChip extends StatelessWidget {
     required this.label,
     required this.selected,
     required this.onTap,
+    this.dense = false,
   });
 
   final String label;
   final bool selected;
   final VoidCallback onTap;
+
+  /// 작은 칩 (할인율 선택 등)
+  final bool dense;
 
   @override
   Widget build(BuildContext context) {
@@ -1108,7 +1314,9 @@ class _SelectChip extends StatelessWidget {
         onTap: onTap,
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 150),
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          padding: dense
+              ? const EdgeInsets.symmetric(horizontal: 10, vertical: 5)
+              : const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
           decoration: BoxDecoration(
             color: selected ? context.colors.primaryLight : context.colors.card,
             borderRadius: BorderRadius.circular(20),
@@ -1120,7 +1328,7 @@ class _SelectChip extends StatelessWidget {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              if (selected) ...[
+              if (selected && !dense) ...[
                 const Icon(Icons.check_rounded,
                     size: 15, color: AppColors.primary),
                 const SizedBox(width: 3),
@@ -1128,7 +1336,7 @@ class _SelectChip extends StatelessWidget {
               Text(
                 label,
                 style: TextStyle(
-                  fontSize: 14,
+                  fontSize: dense ? 13 : 14,
                   fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
                   color: selected ? AppColors.primary : context.colors.subText,
                 ),
@@ -1535,11 +1743,15 @@ class _NameDialog extends StatefulWidget {
     required this.title,
     required this.initial,
     this.showDelete = false,
+    this.suggestions = const [],
   });
 
   final String title;
   final String initial;
   final bool showDelete;
+
+  /// 지난 정산에서 함께한 멤버 이름 (누르면 바로 추가)
+  final List<String> suggestions;
 
   @override
   State<_NameDialog> createState() => _NameDialogState();
@@ -1573,20 +1785,165 @@ class _NameDialogState extends State<_NameDialog> {
         widget.title,
         style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
       ),
-      content: TextField(
-        controller: _c,
-        autofocus: true,
-        maxLength: 10,
-        textInputAction: TextInputAction.done,
-        onSubmitted: (_) => _submit(),
-        decoration:
-            AppDecor.boxInput(context, '이름 입력').copyWith(counterText: ''),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            TextField(
+              controller: _c,
+              autofocus: widget.suggestions.isEmpty,
+              maxLength: 10,
+              textInputAction: TextInputAction.done,
+              onSubmitted: (_) => _submit(),
+              decoration:
+                  AppDecor.boxInput(context, '이름 입력').copyWith(counterText: ''),
+            ),
+            if (widget.suggestions.isNotEmpty) ...[
+              const SizedBox(height: 14),
+              Text('지난 정산에서 함께한 멤버', style: _Txt.caption(context)),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: [
+                  for (final n in widget.suggestions)
+                    _SelectChip(
+                      label: '+ $n',
+                      dense: true,
+                      selected: false,
+                      onTap: () =>
+                          Navigator.of(context).pop(_NameResult.save(n)),
+                    ),
+                ],
+              ),
+            ],
+          ],
+        ),
       ),
       actions: [
         if (widget.showDelete)
           TextButton(
             onPressed: () =>
                 Navigator.of(context).pop(const _NameResult.remove()),
+            child: const Text('삭제', style: TextStyle(color: AppColors.danger)),
+          ),
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: Text('취소', style: TextStyle(color: context.colors.subText)),
+        ),
+        TextButton(
+          onPressed: _submit,
+          child: const Text(
+            '저장',
+            style: TextStyle(
+                color: AppColors.primary, fontWeight: FontWeight.w800),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ── 개별 추가 금액 다이얼로그 ──
+
+class _ExtraResult {
+  const _ExtraResult(this.memberId, this.amount);
+
+  final String memberId;
+
+  /// 0 이면 삭제
+  final int amount;
+}
+
+class _ExtraDialog extends StatefulWidget {
+  const _ExtraDialog({
+    required this.members,
+    this.initialMemberId,
+    this.initialAmount = 0,
+  });
+
+  final List<Member> members;
+  final String? initialMemberId;
+  final int initialAmount;
+
+  @override
+  State<_ExtraDialog> createState() => _ExtraDialogState();
+}
+
+class _ExtraDialogState extends State<_ExtraDialog> {
+  late String? _memberId = widget.initialMemberId ??
+      (widget.members.isEmpty ? null : widget.members.first.id);
+  late final TextEditingController _c = TextEditingController(
+    text: widget.initialAmount > 0 ? Fmt.number(widget.initialAmount) : '',
+  );
+
+  bool get _editing => widget.initialMemberId != null;
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final id = _memberId;
+    final v = int.tryParse(_c.text.replaceAll(',', '')) ?? 0;
+    if (id == null || (v <= 0 && !_editing)) return;
+    Navigator.of(context).pop(_ExtraResult(id, v));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: context.colors.card,
+      surfaceTintColor: Colors.transparent,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+      title: Text(
+        _editing ? '추가 금액 수정' : '개별 추가 금액',
+        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+      ),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('누가 따로 시켰나요?', style: _Txt.caption(context)),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: [
+                for (final m in widget.members)
+                  _SelectChip(
+                    label: m.name,
+                    dense: true,
+                    selected: _memberId == m.id,
+                    onTap: _editing
+                        ? () {}
+                        : () => setState(() => _memberId = m.id),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _c,
+              autofocus: true,
+              keyboardType: TextInputType.number,
+              inputFormatters: [ThousandsFormatter()],
+              textInputAction: TextInputAction.done,
+              onSubmitted: (_) => _submit(),
+              decoration: AppDecor.boxInput(context, '금액 (예: 12,000)')
+                  .copyWith(suffixText: '원'),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        if (_editing)
+          TextButton(
+            onPressed: () => Navigator.of(context)
+                .pop(_ExtraResult(widget.initialMemberId!, 0)),
             child: const Text('삭제', style: TextStyle(color: AppColors.danger)),
           ),
         TextButton(

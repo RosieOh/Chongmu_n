@@ -97,7 +97,10 @@ class ProManager {
 // ═════════════════════════════════════════════
 
 class SettingsScreen extends StatefulWidget {
-  const SettingsScreen({super.key});
+  const SettingsScreen({super.key, this.current});
+
+  /// 지금 메인 화면의 정산 (백업에 함께 담아요)
+  final Settlement? current;
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -132,6 +135,66 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (!mounted) return;
     setState(() => _restoring = false);
     _toast(ok ? '구매 내역을 복원했어요' : '복원할 구매 내역이 없어요');
+  }
+
+  Future<void> _copyBackup() async {
+    HapticFeedback.lightImpact();
+    final current = widget.current ?? AppStorage.loadSettlement();
+    await Clipboard.setData(
+        ClipboardData(text: AppStorage.exportBackup(current)));
+    if (!mounted) return;
+    final count = AppStorage.loadHistory().length;
+    _toast('정산 $count건을 복사했어요. 메모장이나 나에게 보내기로 보관하세요');
+  }
+
+  Future<void> _restoreBackup() async {
+    HapticFeedback.lightImpact();
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    final raw = data?.text?.trim() ?? '';
+    if (!mounted) return;
+    if (raw.isEmpty) {
+      _toast('먼저 백업 내용을 복사한 뒤 눌러 주세요');
+      return;
+    }
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: context.colors.card,
+        surfaceTintColor: Colors.transparent,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        title: const Text(
+          '복사한 백업으로 복원할까요?',
+          style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+        ),
+        content: const Text(
+          '백업 속 정산을 \'지난 정산\'에 합쳐요.\n지금 있는 기록은 지워지지 않아요.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: Text('취소', style: TextStyle(color: context.colors.subText)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text(
+              '복원하기',
+              style: TextStyle(
+                color: AppColors.primary,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    try {
+      final count = await AppStorage.importBackup(raw);
+      if (!mounted) return;
+      _toast('정산 $count건을 복원했어요. \'지난 정산\'에서 확인하세요');
+    } on FormatException catch (e) {
+      if (mounted) _toast('복원하지 못했어요: ${e.message}');
+    }
   }
 
   Future<void> _confirmNewSettlement() async {
@@ -233,6 +296,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
               ),
               const SizedBox(height: 28),
+              const _SectionTitle('데이터 백업'),
+              Container(
+                decoration: AppDecor.card(context),
+                child: Column(
+                  children: [
+                    _Tile(
+                      icon: Icons.copy_all_rounded,
+                      title: '백업 복사하기',
+                      subtitle: '휴대폰을 바꾸기 전에 복사해서 보관하세요',
+                      onTap: _copyBackup,
+                    ),
+                    const Divider(indent: 56),
+                    _Tile(
+                      icon: Icons.content_paste_go_rounded,
+                      title: '복사한 백업으로 복원',
+                      subtitle: '백업 내용을 복사한 뒤 눌러 주세요',
+                      onTap: _restoreBackup,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 28),
               const _SectionTitle('앱 정보'),
               Container(
                 decoration: AppDecor.card(context),
@@ -242,7 +327,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       icon: Icons.info_outline_rounded,
                       title: '버전',
                       trailing: Text(
-                        '1.0.0',
+                        '1.1.0',
                         style: TextStyle(color: context.colors.subText),
                       ),
                     ),

@@ -5,9 +5,29 @@ import 'package:intl/intl.dart';
 import '../models/round_item.dart';
 import '../theme/app_theme.dart';
 
+/// 지난 정산 화면에서 고른 결과
+class HistoryPick {
+  const HistoryPick(this.id, {this.asNew = false});
+
+  final String id;
+
+  /// true 면 그 정산의 멤버로 새 정산 시작 (원본은 그대로)
+  final bool asNew;
+}
+
+/// 정산이 검색어와 맞는지 (모임 이름 / 멤버 이름 / 장소 이름)
+bool matchesHistoryQuery(Settlement s, String query) {
+  final q = query.trim().toLowerCase();
+  if (q.isEmpty) return true;
+  bool has(String v) => v.toLowerCase().contains(q);
+  return has(s.title) ||
+      s.members.any((m) => has(m.name)) ||
+      s.rounds.any((r) => has(r.name));
+}
+
 /// ④ 지난 정산 기록 목록
 ///
-/// 항목을 누르면 그 정산의 ID 를 돌려주고(Navigator.pop), 메인 화면이 불러옵니다.
+/// 항목을 누르면 [HistoryPick] 을 돌려주고(Navigator.pop), 메인 화면이 불러옵니다.
 class HistoryScreen extends StatefulWidget {
   const HistoryScreen({super.key, required this.currentId});
 
@@ -20,6 +40,14 @@ class HistoryScreen extends StatefulWidget {
 
 class _HistoryScreenState extends State<HistoryScreen> {
   late final List<Settlement> _items = AppStorage.loadHistory();
+  final TextEditingController _searchCtrl = TextEditingController();
+  String _query = '';
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
 
   void _toast(String msg, {SnackBarAction? action}) {
     ScaffoldMessenger.of(context)
@@ -37,7 +65,70 @@ class _HistoryScreenState extends State<HistoryScreen> {
       Navigator.of(context).pop();
       return;
     }
-    Navigator.of(context).pop(s.id);
+    Navigator.of(context).pop(HistoryPick(s.id));
+  }
+
+  void _startNewFrom(Settlement s) {
+    HapticFeedback.lightImpact();
+    Navigator.of(context).pop(HistoryPick(s.id, asNew: true));
+  }
+
+  /// 길게 누르면 나오는 메뉴
+  Future<void> _showActions(Settlement s) async {
+    HapticFeedback.mediumImpact();
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: context.colors.card,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
+              child: Text(
+                _titleOf(s),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w800,
+                  color: context.colors.text,
+                ),
+              ),
+            ),
+            _SheetTile(
+              icon: Icons.open_in_new_rounded,
+              title: '불러오기',
+              onTap: () => Navigator.of(ctx).pop('open'),
+            ),
+            _SheetTile(
+              icon: Icons.group_add_rounded,
+              title: '이 멤버로 새 정산 시작',
+              subtitle: '정기 모임이면 멤버를 다시 입력할 필요 없어요',
+              onTap: () => Navigator.of(ctx).pop('new'),
+            ),
+            if (s.id != widget.currentId)
+              _SheetTile(
+                icon: Icons.delete_outline_rounded,
+                title: '삭제',
+                danger: true,
+                onTap: () => Navigator.of(ctx).pop('delete'),
+              ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (!mounted) return;
+    switch (action) {
+      case 'open':
+        _open(s);
+      case 'new':
+        _startNewFrom(s);
+      case 'delete':
+        _delete(s);
+    }
   }
 
   Future<bool> _confirmDelete(Settlement s) async {
@@ -78,12 +169,14 @@ class _HistoryScreenState extends State<HistoryScreen> {
   Widget _buildList() {
     // 월별로 묶어서 헤더 + 카드 목록 만들기 (최신순)
     final children = <Widget>[];
+    final visible =
+        _items.where((s) => matchesHistoryQuery(s, _query)).toList();
     String? currentMonth;
-    for (final s in _items) {
+    for (final s in visible) {
       final month = DateFormat('yyyy년 M월').format(s.createdAt);
       if (month != currentMonth) {
         currentMonth = month;
-        final monthTotal = _items
+        final monthTotal = visible
             .where((e) => DateFormat('yyyy년 M월').format(e.createdAt) == month)
             .fold<int>(0, (sum, e) => sum + e.totalSpent);
         children.add(_MonthHeader(month: month, total: monthTotal));
@@ -122,6 +215,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
               settlement: s,
               isCurrent: s.id == widget.currentId,
               onTap: () => _open(s),
+              onLongPress: () => _showActions(s),
             ),
           ),
         ),
@@ -131,13 +225,43 @@ class _HistoryScreenState extends State<HistoryScreen> {
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 4, 16, 32),
       children: [
+        _StatsCard(items: _items),
+        const SizedBox(height: 12),
+        TextField(
+          controller: _searchCtrl,
+          textInputAction: TextInputAction.search,
+          onChanged: (v) => setState(() => _query = v),
+          decoration: AppDecor.boxInput(context, '모임·멤버·장소 이름으로 검색').copyWith(
+            prefixIcon: Icon(Icons.search_rounded, color: context.colors.hint),
+            suffixIcon: _query.isEmpty
+                ? null
+                : IconButton(
+                    tooltip: '검색어 지우기',
+                    icon: Icon(Icons.close_rounded,
+                        color: context.colors.subText),
+                    onPressed: () {
+                      _searchCtrl.clear();
+                      setState(() => _query = '');
+                    },
+                  ),
+          ),
+        ),
         Padding(
-          padding: EdgeInsets.only(left: 4, bottom: 4),
+          padding: const EdgeInsets.only(left: 4, top: 8, bottom: 4),
           child: Text(
-            '눌러서 불러오고, 왼쪽으로 밀어서 삭제해요',
+            '눌러서 불러오고, 길게 눌러 새 정산 · 왼쪽으로 밀어서 삭제',
             style: TextStyle(fontSize: 12, color: context.colors.subText),
           ),
         ),
+        if (visible.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 40),
+            child: Text(
+              '"${_query.trim()}" 검색 결과가 없어요',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 14, color: context.colors.subText),
+            ),
+          ),
         ...children,
       ],
     );
@@ -191,17 +315,20 @@ class _HistoryCard extends StatelessWidget {
     required this.settlement,
     required this.isCurrent,
     required this.onTap,
+    this.onLongPress,
   });
 
   final Settlement settlement;
   final bool isCurrent;
   final VoidCallback onTap;
+  final VoidCallback? onLongPress;
 
   @override
   Widget build(BuildContext context) {
     final s = settlement;
     final results = s.buildResults();
-    final paid = results.where((p) => s.isPaid(p.member.id)).length;
+    final dues = s.buildDues(results);
+    final paid = dues.where((d) => s.isPaid(d.member.id)).length;
     final roundCount = s.rounds.where((r) => r.amount > 0).length;
     final places = s.rounds
         .where((r) => r.amount > 0 && r.name.trim().isNotEmpty)
@@ -220,6 +347,7 @@ class _HistoryCard extends StatelessWidget {
         child: InkWell(
           borderRadius: BorderRadius.circular(AppDecor.radius),
           onTap: onTap,
+          onLongPress: onLongPress,
           child: Padding(
             padding: const EdgeInsets.all(14),
             child: Row(
@@ -313,7 +441,7 @@ class _HistoryCard extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 4),
-                    _paidTag(context, paid, results.length),
+                    _paidTag(context, paid, dues.length),
                   ],
                 ),
               ],
@@ -359,6 +487,121 @@ class _Tag extends StatelessWidget {
           color: filled ? Colors.white : color,
         ),
       ),
+    );
+  }
+}
+
+/// 상단 통계: 정산 횟수 · 누적 지출 · 가장 자주 함께한 멤버
+class _StatsCard extends StatelessWidget {
+  const _StatsCard({required this.items});
+
+  final List<Settlement> items;
+
+  @override
+  Widget build(BuildContext context) {
+    final total = items.fold<int>(0, (sum, s) => sum + s.totalSpent);
+    final now = DateTime.now();
+    final thisMonth = items
+        .where((s) =>
+            s.createdAt.year == now.year && s.createdAt.month == now.month)
+        .fold<int>(0, (sum, s) => sum + s.totalSpent);
+    final best = AppStorage.recentMemberNames(limit: 1);
+
+    Widget stat(String label, String value) => Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                style: TextStyle(fontSize: 12, color: context.colors.subText),
+              ),
+              const SizedBox(height: 2),
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  value,
+                  style: TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w900,
+                    color: context.colors.text,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+
+    return Container(
+      decoration: AppDecor.card(context),
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              stat('정산 횟수', '${items.length}번'),
+              stat('누적 지출', Fmt.won(total)),
+              stat('이번 달', Fmt.won(thisMonth)),
+            ],
+          ),
+          if (best.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: context.colors.primaryLight,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(
+                '🤝 가장 자주 함께한 멤버: ${best.first}',
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.primary,
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// 길게 누르기 메뉴 항목
+class _SheetTile extends StatelessWidget {
+  const _SheetTile({
+    required this.icon,
+    required this.title,
+    required this.onTap,
+    this.subtitle,
+    this.danger = false,
+  });
+
+  final IconData icon;
+  final String title;
+  final String? subtitle;
+  final VoidCallback onTap;
+  final bool danger;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = danger ? AppColors.danger : context.colors.text;
+    return ListTile(
+      onTap: onTap,
+      leading: Icon(icon, color: danger ? AppColors.danger : AppColors.primary),
+      title: Text(
+        title,
+        style: TextStyle(fontWeight: FontWeight.w700, color: color),
+      ),
+      subtitle: subtitle == null
+          ? null
+          : Text(
+              subtitle!,
+              style: TextStyle(fontSize: 12, color: context.colors.subText),
+            ),
     );
   }
 }

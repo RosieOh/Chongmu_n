@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -62,11 +63,19 @@ class RoundItem {
     Set<String>? participantIds,
     this.soberDiscount = false,
     Set<String>? soberIds,
-  })  : participantIds = participantIds ?? <String>{},
+    int discountPercent = defaultDiscount,
+    Map<String, int>? extras,
+    this.payerId,
+  })  : extras = extras ?? <String, int>{},
+        discountPercent = discountOptions.contains(discountPercent)
+            ? discountPercent
+            : defaultDiscount,
+        participantIds = participantIds ?? <String>{},
         soberIds = soberIds ?? <String>{};
 
-  /// 술 안 마신 사람은 80%만 냅니다 (20% 할인)
-  static const double soberRate = 0.8;
+  /// 술 안 마신 사람 할인율 선택지 (%)
+  static const List<int> discountOptions = [10, 20, 30, 50];
+  static const int defaultDiscount = 20;
 
   final String id;
   String name;
@@ -75,11 +84,43 @@ class RoundItem {
   /// 이 차수에 참석한 멤버 ID
   final Set<String> participantIds;
 
-  /// '술 안 마신 인원 20% 할인' 토글
+  /// '술 안 마신 인원 할인' 토글
   bool soberDiscount;
 
   /// 술 안 마신 멤버 ID (participantIds 의 부분집합)
   final Set<String> soberIds;
+
+  /// 술 안 마신 사람 할인율 (%) — 기본 20% (80%만 냄)
+  int discountPercent;
+
+  /// 술 안 마신 사람이 내는 비율 (20% 할인 → 0.8)
+  double get soberRate => (100 - discountPercent) / 100;
+
+  /// 이 차수를 실제로 결제한 멤버 ID (null 이면 총무 = 첫 번째 멤버)
+  String? payerId;
+
+  /// 개별 추가 금액 (멤버 ID → 금액). 혼자 시킨 메뉴처럼 그 사람만 내는 돈.
+  /// 결제 금액에서 추가금을 먼저 빼고, 남은 금액을 N빵합니다.
+  final Map<String, int> extras;
+
+  int get extrasTotal => extras.values.fold(0, (sum, v) => sum + v);
+
+  int extraOf(String memberId) => extras[memberId] ?? 0;
+
+  /// 추가금이 결제 금액보다 큰 잘못된 입력인지
+  bool get extrasOverflow => extrasTotal > amount;
+
+  /// N빵할 공통 금액 (결제 금액 - 개별 추가금)
+  int get sharedAmount => math.max(0, amount - extrasTotal);
+
+  /// 추가금 설정 (0 이하면 삭제). 참석자에게만 설정할 수 있어요.
+  void setExtra(String memberId, int value) {
+    if (value <= 0 || !participantIds.contains(memberId)) {
+      extras.remove(memberId);
+    } else {
+      extras[memberId] = value;
+    }
+  }
 
   int get headCount => participantIds.length;
 
@@ -96,29 +137,30 @@ class RoundItem {
     return w;
   }
 
-  /// 특정 멤버가 이 차수에서 내야 할 정확한 금액 (올림 전)
+  /// 특정 멤버가 이 차수에서 내야 할 정확한 금액 (올림 전, 추가금 포함)
   double exactShareFor(String memberId) {
     if (amount <= 0 || !participantIds.contains(memberId)) return 0;
     final tw = _totalWeight;
     if (tw <= 0) return 0;
-    return amount * weightOf(memberId) / tw;
+    return sharedAmount * weightOf(memberId) / tw + extraOf(memberId);
   }
 
-  /// 카드에 표시할 1인당 금액 (술 마신 사람 기준, 올림)
+  /// 카드에 표시할 1인당 금액 (술 마신 사람 기준, 추가금 제외, 올림)
   int perPerson(int unit) {
     if (amount <= 0 || headCount == 0) return 0;
-    return roundUpTo(amount / _totalWeight, unit);
+    return roundUpTo(sharedAmount / _totalWeight, unit);
   }
 
-  /// 술 안 마신 사람의 1인당 금액 (올림)
+  /// 술 안 마신 사람의 1인당 금액 (추가금 제외, 올림)
   int soberPerPerson(int unit) {
     if (amount <= 0 || headCount == 0) return 0;
-    return roundUpTo(amount * soberRate / _totalWeight, unit);
+    return roundUpTo(sharedAmount * soberRate / _totalWeight, unit);
   }
 
   void removeParticipant(String memberId) {
     participantIds.remove(memberId);
     soberIds.remove(memberId);
+    extras.remove(memberId);
   }
 
   Map<String, dynamic> toJson() => {
@@ -128,6 +170,9 @@ class RoundItem {
         'participantIds': participantIds.toList(),
         'soberDiscount': soberDiscount,
         'soberIds': soberIds.toList(),
+        'discountPercent': discountPercent,
+        'extras': Map<String, int>.of(extras),
+        if (payerId != null) 'payerId': payerId,
       };
 
   factory RoundItem.fromJson(Map<String, dynamic> json) {
@@ -135,6 +180,14 @@ class RoundItem {
         Set<String>.from((json['participantIds'] as List?) ?? const []);
     final sober = Set<String>.from((json['soberIds'] as List?) ?? const [])
       ..retainAll(participants);
+    final extras = <String, int>{};
+    final rawExtras = json['extras'];
+    if (rawExtras is Map) {
+      rawExtras.forEach((k, v) {
+        final value = (v as num?)?.toInt() ?? 0;
+        if (value > 0 && participants.contains(k)) extras[k as String] = value;
+      });
+    }
     return RoundItem(
       id: json['id'] as String,
       name: (json['name'] as String?) ?? '',
@@ -142,6 +195,10 @@ class RoundItem {
       participantIds: participants,
       soberDiscount: (json['soberDiscount'] as bool?) ?? false,
       soberIds: sober,
+      discountPercent:
+          (json['discountPercent'] as num?)?.toInt() ?? defaultDiscount,
+      extras: extras,
+      payerId: json['payerId'] as String?,
     );
   }
 }
@@ -168,6 +225,46 @@ class PersonResult {
 
   /// 최종 입금액 (단위 올림 적용)
   final int pay;
+}
+
+// ─────────────────────────────────────────────
+// 송금 정리 (여러 명이 나눠 결제했을 때)
+// ─────────────────────────────────────────────
+
+/// A → B 에게 amount 원 보내기
+class Transfer {
+  const Transfer({
+    required this.from,
+    required this.to,
+    required this.amount,
+  });
+
+  final Member from;
+  final Member to;
+  final int amount;
+}
+
+/// 송금 정리 계산용 (남은 금액)
+class _Balance {
+  _Balance(this.member, this.left);
+
+  final Member member;
+  int left;
+}
+
+/// 한 사람이 보내야 할 돈 (입금 확인 단위)
+class Due {
+  const Due({
+    required this.member,
+    required this.amount,
+    this.transfers = const [],
+  });
+
+  final Member member;
+  final int amount;
+
+  /// 송금 정리 모드에서 누구에게 얼마씩 보내는지
+  final List<Transfer> transfers;
 }
 
 // ─────────────────────────────────────────────
@@ -254,7 +351,89 @@ class Settlement {
     paidIds.remove(memberId);
     for (final r in rounds) {
       r.removeParticipant(memberId);
+      if (r.payerId == memberId) r.payerId = null;
     }
+  }
+
+  // ── 결제자 / 송금 정리 ──
+
+  /// 총무 (첫 번째 멤버). 자투리 잔액을 갖고, 기본 결제자예요.
+  Member get treasurer => members.first;
+
+  Member memberById(String id) =>
+      members.firstWhere((m) => m.id == id, orElse: () => treasurer);
+
+  /// 이 차수를 결제한 멤버 (지정이 없거나 삭제된 멤버면 총무)
+  Member payerOf(RoundItem r) {
+    final id = r.payerId;
+    if (id == null) return treasurer;
+    return memberById(id);
+  }
+
+  /// 총무 말고 다른 사람이 결제한 차수가 있으면 '송금 정리' 모드
+  bool get usesTransfers =>
+      rounds.any((r) => r.amount > 0 && payerOf(r).id != treasurer.id);
+
+  /// 누가 누구에게 얼마 보내면 되는지 (송금 횟수가 적도록 큰 금액부터 짝지음).
+  /// 올림으로 생긴 자투리는 총무가 받아요.
+  List<Transfer> buildTransfers([List<PersonResult>? results]) {
+    final res = results ?? buildResults();
+    final net = <String, int>{for (final m in members) m.id: 0};
+    for (final p in res) {
+      net[p.member.id] = net[p.member.id]! + p.pay;
+    }
+    for (final r in rounds) {
+      if (r.amount <= 0) continue;
+      final id = payerOf(r).id;
+      net[id] = net[id]! - r.amount;
+    }
+    // 자투리(걷는 돈 - 실제 지출)는 총무 몫
+    final rest = net.values.fold(0, (a, b) => a + b);
+    net[treasurer.id] = net[treasurer.id]! - rest;
+
+    final debtors = [
+      for (final m in members)
+        if (net[m.id]! > 0) _Balance(m, net[m.id]!)
+    ]..sort((a, b) => b.left.compareTo(a.left));
+    final creditors = [
+      for (final m in members)
+        if (net[m.id]! < 0) _Balance(m, -net[m.id]!)
+    ]..sort((a, b) => b.left.compareTo(a.left));
+
+    final out = <Transfer>[];
+    var i = 0, j = 0;
+    while (i < debtors.length && j < creditors.length) {
+      final d = debtors[i], c = creditors[j];
+      final x = math.min(d.left, c.left);
+      out.add(Transfer(from: d.member, to: c.member, amount: x));
+      d.left -= x;
+      c.left -= x;
+      if (d.left == 0) i++;
+      if (c.left == 0) j++;
+    }
+    return out;
+  }
+
+  /// 입금 확인 목록.
+  /// - 총무 혼자 결제: 참석한 모든 사람이 총무에게 자기 몫을 냄
+  /// - 여러 명 결제: 송금 정리에서 돈을 보내야 하는 사람만
+  List<Due> buildDues([List<PersonResult>? results]) {
+    final res = results ?? buildResults();
+    if (!usesTransfers) {
+      return [for (final p in res) Due(member: p.member, amount: p.pay)];
+    }
+    final transfers = buildTransfers(res);
+    return [
+      for (final m in members)
+        if (transfers.any((t) => t.from.id == m.id))
+          Due(
+            member: m,
+            amount: transfers
+                .where((t) => t.from.id == m.id)
+                .fold(0, (sum, t) => sum + t.amount),
+            transfers: transfers.where((t) => t.from.id == m.id).toList(),
+          ),
+    ];
   }
 
   /// 새 차수 (기본값: 모든 멤버 참석)
@@ -340,9 +519,13 @@ class Settlement {
   }
 
   /// 새 정산 (멤버만 유지)
-  factory Settlement.fresh(
-      {required List<Member> members, int roundUnit = 100}) {
+  factory Settlement.fresh({
+    required List<Member> members,
+    int roundUnit = 100,
+    String title = '',
+  }) {
     final s = Settlement(
+      title: title,
       members: members.map((m) => m.copy()).toList(),
       rounds: [],
       roundUnit: roundUnit,
@@ -451,6 +634,30 @@ class AppStorage {
     return null;
   }
 
+  /// 지난 정산에 자주 나온 멤버 이름 (많이 함께한 순, 기본 이름 제외)
+  static List<String> recentMemberNames({int limit = 12}) {
+    final count = <String, int>{};
+    final last = <String, DateTime>{};
+    final auto = RegExp(r'^참석자\d+$');
+    for (final s in _history) {
+      for (final m in s.members) {
+        final name = m.name.trim();
+        if (name.isEmpty || auto.hasMatch(name) || name.contains('총무')) {
+          continue;
+        }
+        count[name] = (count[name] ?? 0) + 1;
+        final prev = last[name];
+        if (prev == null || s.createdAt.isAfter(prev)) last[name] = s.createdAt;
+      }
+    }
+    final names = count.keys.toList()
+      ..sort((a, b) {
+        final c = count[b]!.compareTo(count[a]!);
+        return c != 0 ? c : last[b]!.compareTo(last[a]!);
+      });
+    return names.take(limit).toList();
+  }
+
   static Future<void> deleteHistory(String id) {
     _history.removeWhere((e) => e.id == id);
     return _writeHistory();
@@ -499,6 +706,76 @@ class AppStorage {
       writes.add(_writeHistory());
     }
     await Future.wait(writes);
+  }
+
+  // ── 백업 / 복원 (클립보드로 옮기기) ──
+
+  static const _backupApp = 'chongmu_n';
+
+  /// 지금 정산 + 지난 정산 + 계좌 정보를 JSON 문자열로.
+  /// PRO 구매 여부는 넣지 않아요 (복원은 '구매 내역 복원'으로).
+  static String exportBackup(Settlement current) => jsonEncode({
+        'app': _backupApp,
+        'version': 1,
+        'exportedAt': DateTime.now().toIso8601String(),
+        'current': current.toJson(),
+        'history': _history.map((e) => e.toJson()).toList(),
+        'account': {
+          'bank': bankName,
+          'holder': accountHolder,
+          'number': accountNumber,
+        },
+      });
+
+  /// 백업 문자열을 지난 정산에 합칩니다 (같은 정산은 백업 내용으로 갱신).
+  /// 계좌가 비어 있으면 백업의 계좌도 채워요. 합친 정산 개수를 돌려줍니다.
+  /// 형식이 맞지 않으면 [FormatException].
+  static Future<int> importBackup(String raw) async {
+    final Map<String, dynamic> data;
+    try {
+      data = Map<String, dynamic>.from(jsonDecode(raw.trim()) as Map);
+    } catch (_) {
+      throw const FormatException('백업 형식이 아니에요');
+    }
+    if (data['app'] != _backupApp) {
+      throw const FormatException('똑똑한 총무 백업이 아니에요');
+    }
+
+    final incoming = <Settlement>[
+      for (final e in (data['history'] as List?) ?? const [])
+        Settlement.fromJson(Map<String, dynamic>.from(e as Map)),
+    ];
+    final current = data['current'];
+    if (current is Map) {
+      final s = Settlement.fromJson(Map<String, dynamic>.from(current));
+      if (!s.isSample &&
+          s.totalSpent > 0 &&
+          !incoming.any((e) => e.id == s.id)) {
+        incoming.add(s);
+      }
+    }
+
+    final history = _history;
+    for (final s in incoming) {
+      history
+        ..removeWhere((e) => e.id == s.id)
+        ..add(s);
+    }
+    _sortHistory(history);
+
+    final writes = <Future<void>>[_writeHistory()];
+    final account = data['account'];
+    if (account is Map && accountNumber.isEmpty) {
+      final number = (account['number'] as String?)?.trim() ?? '';
+      if (number.isNotEmpty) {
+        writes
+          ..add(setAccountNumber(number))
+          ..add(setBankName((account['bank'] as String?)?.trim() ?? ''))
+          ..add(setAccountHolder((account['holder'] as String?)?.trim() ?? ''));
+      }
+    }
+    await Future.wait(writes);
+    return incoming.length;
   }
 
   static String get bankName => _prefs.getString(_kBank) ?? '';
