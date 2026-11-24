@@ -345,29 +345,24 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
             ),
           ),
           const SizedBox(height: 10),
+          // 작은 화면(아이폰 SE)에서도 넘치지 않도록 양쪽을 반씩 나누고 필요하면 축소
           Row(
             children: [
-              Text('받은 금액 ',
-                  style:
-                      TextStyle(fontSize: 12, color: context.colors.subText)),
-              Text(
-                Fmt.won(received),
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w800,
+              Expanded(
+                child: _MoneyLabel(
+                  label: '받은 금액',
+                  amount: received,
                   color: context.colors.text,
+                  alignment: Alignment.centerLeft,
                 ),
               ),
-              const Spacer(),
-              Text('남은 금액 ',
-                  style:
-                      TextStyle(fontSize: 12, color: context.colors.subText)),
-              Text(
-                Fmt.won(remain),
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w800,
+              const SizedBox(width: 12),
+              Expanded(
+                child: _MoneyLabel(
+                  label: '남은 금액',
+                  amount: remain,
                   color: remain > 0 ? AppColors.danger : AppColors.primary,
+                  alignment: Alignment.centerRight,
                 ),
               ),
             ],
@@ -579,6 +574,46 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// '받은 금액 51,400원' 처럼 라벨 + 금액 (공간이 모자라면 글자를 줄여서 표시)
+class _MoneyLabel extends StatelessWidget {
+  const _MoneyLabel({
+    required this.label,
+    required this.amount,
+    required this.color,
+    required this.alignment,
+  });
+
+  final String label;
+  final int amount;
+  final Color color;
+  final Alignment alignment;
+
+  @override
+  Widget build(BuildContext context) {
+    return FittedBox(
+      fit: BoxFit.scaleDown,
+      alignment: alignment,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            '$label ',
+            style: TextStyle(fontSize: 12, color: context.colors.subText),
+          ),
+          Text(
+            Fmt.won(amount),
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w800,
+              color: color,
+            ),
+          ),
+        ],
       ),
     );
   }

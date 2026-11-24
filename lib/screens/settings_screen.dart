@@ -419,12 +419,14 @@ class _Benefit extends StatelessWidget {
         children: [
           const Icon(Icons.check_circle_rounded, color: Colors.white, size: 18),
           const SizedBox(width: 8),
-          Text(
-            text,
-            style: const TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-              color: Colors.white,
+          Flexible(
+            child: Text(
+              text,
+              style: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: Colors.white,
+              ),
             ),
           ),
         ],
@@ -471,29 +473,34 @@ class _Tile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ListTile(
-      onTap: onTap,
-      shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(AppDecor.radius)),
-      leading: Icon(icon, color: AppColors.primary),
-      title: Text(
-        title,
-        style: TextStyle(
-          fontSize: 15,
-          fontWeight: FontWeight.w700,
-          color: context.colors.text,
+    // 카드(Container) 위에서도 눌림 효과가 보이도록 투명 Material 로 감쌈
+    return Material(
+      type: MaterialType.transparency,
+      child: ListTile(
+        onTap: onTap,
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppDecor.radius)),
+        leading: Icon(icon, color: AppColors.primary),
+        title: Text(
+          title,
+          style: TextStyle(
+            fontSize: 15,
+            fontWeight: FontWeight.w700,
+            color: context.colors.text,
+          ),
         ),
+        subtitle: subtitle == null
+            ? null
+            : Text(
+                subtitle!,
+                style: TextStyle(fontSize: 12, color: context.colors.subText),
+              ),
+        trailing: trailing ??
+            (onTap == null
+                ? null
+                : Icon(Icons.chevron_right_rounded,
+                    color: context.colors.hint)),
       ),
-      subtitle: subtitle == null
-          ? null
-          : Text(
-              subtitle!,
-              style: TextStyle(fontSize: 12, color: context.colors.subText),
-            ),
-      trailing: trailing ??
-          (onTap == null
-              ? null
-              : Icon(Icons.chevron_right_rounded, color: context.colors.hint)),
     );
   }
 }
