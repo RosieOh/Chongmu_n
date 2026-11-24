@@ -3,7 +3,7 @@ description: "똑똑한 총무 - 차수별 N빵 정산기"
 publish_to: "none"
 
 # 스토어에 새 버전을 올릴 때마다 + 뒤 숫자(빌드 번호)를 1씩 올려주세요.
-version: 1.0.0+1
+version: 1.1.0+2
 
 environment:
   sdk: ^3.5.0
