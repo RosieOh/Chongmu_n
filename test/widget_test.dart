@@ -214,6 +214,23 @@ void main() {
       expect(AppStorage.historyById(s.id)?.totalSpent, 50000);
     });
 
+    test('지난 멤버 이름: 자주 함께한 순, 기본 이름·총무 제외', () async {
+      Settlement make(List<String> names, int day) => Settlement(
+            createdAt: DateTime(2026, 1, day),
+            members: [
+              for (var i = 0; i < names.length; i++)
+                Member(id: 'm$i', name: names[i])
+            ],
+            rounds: [
+              RoundItem(id: 'r', amount: 10000, participantIds: {'m0'})
+            ],
+          );
+      await AppStorage.saveSettlement(make(['나(총무)', '민수', '참석자3'], 1));
+      await AppStorage.saveSettlement(make(['나(총무)', '지영', '민수'], 2));
+      await AppStorage.saveSettlement(make(['나(총무)', '현우'], 3));
+      expect(AppStorage.recentMemberNames(), ['민수', '현우', '지영']);
+    });
+
     test('불러온 기록을 수정해도 저장본은 그대로 (복사본)', () async {
       final s = Settlement.blank();
       s.rounds.first.amount = 50000;

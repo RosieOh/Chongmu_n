@@ -220,9 +220,17 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _addMember() async {
     HapticFeedback.lightImpact();
+    final current = _s.members.map((m) => m.name.trim()).toSet();
+    final suggestions = AppStorage.recentMemberNames()
+        .where((n) => !current.contains(n))
+        .toList();
     final res = await showDialog<_NameResult>(
       context: context,
-      builder: (_) => const _NameDialog(title: '멤버 추가', initial: ''),
+      builder: (_) => _NameDialog(
+        title: '멤버 추가',
+        initial: '',
+        suggestions: suggestions,
+      ),
     );
     if (res == null || res.delete || !mounted) return;
     _update(() => _s.addMember(res.name));
@@ -1726,11 +1734,15 @@ class _NameDialog extends StatefulWidget {
     required this.title,
     required this.initial,
     this.showDelete = false,
+    this.suggestions = const [],
   });
 
   final String title;
   final String initial;
   final bool showDelete;
+
+  /// 지난 정산에서 함께한 멤버 이름 (누르면 바로 추가)
+  final List<String> suggestions;
 
   @override
   State<_NameDialog> createState() => _NameDialogState();
@@ -1764,14 +1776,41 @@ class _NameDialogState extends State<_NameDialog> {
         widget.title,
         style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
       ),
-      content: TextField(
-        controller: _c,
-        autofocus: true,
-        maxLength: 10,
-        textInputAction: TextInputAction.done,
-        onSubmitted: (_) => _submit(),
-        decoration:
-            AppDecor.boxInput(context, '이름 입력').copyWith(counterText: ''),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            TextField(
+              controller: _c,
+              autofocus: widget.suggestions.isEmpty,
+              maxLength: 10,
+              textInputAction: TextInputAction.done,
+              onSubmitted: (_) => _submit(),
+              decoration:
+                  AppDecor.boxInput(context, '이름 입력').copyWith(counterText: ''),
+            ),
+            if (widget.suggestions.isNotEmpty) ...[
+              const SizedBox(height: 14),
+              Text('지난 정산에서 함께한 멤버', style: _Txt.caption(context)),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: [
+                  for (final n in widget.suggestions)
+                    _SelectChip(
+                      label: '+ $n',
+                      dense: true,
+                      selected: false,
+                      onTap: () =>
+                          Navigator.of(context).pop(_NameResult.save(n)),
+                    ),
+                ],
+              ),
+            ],
+          ],
+        ),
       ),
       actions: [
         if (widget.showDelete)

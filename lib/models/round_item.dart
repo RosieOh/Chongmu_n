@@ -630,6 +630,30 @@ class AppStorage {
     return null;
   }
 
+  /// 지난 정산에 자주 나온 멤버 이름 (많이 함께한 순, 기본 이름 제외)
+  static List<String> recentMemberNames({int limit = 12}) {
+    final count = <String, int>{};
+    final last = <String, DateTime>{};
+    final auto = RegExp(r'^참석자\d+$');
+    for (final s in _history) {
+      for (final m in s.members) {
+        final name = m.name.trim();
+        if (name.isEmpty || auto.hasMatch(name) || name.contains('총무')) {
+          continue;
+        }
+        count[name] = (count[name] ?? 0) + 1;
+        final prev = last[name];
+        if (prev == null || s.createdAt.isAfter(prev)) last[name] = s.createdAt;
+      }
+    }
+    final names = count.keys.toList()
+      ..sort((a, b) {
+        final c = count[b]!.compareTo(count[a]!);
+        return c != 0 ? c : last[b]!.compareTo(last[a]!);
+      });
+    return names.take(limit).toList();
+  }
+
   static Future<void> deleteHistory(String id) {
     _history.removeWhere((e) => e.id == id);
     return _writeHistory();
