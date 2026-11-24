@@ -18,6 +18,7 @@ dependencies:
   shared_preferences: ^2.3.0 # 기기 로컬 저장 (계좌, 정산 데이터, PRO 여부)
   intl: ^0.20.0 # 천 단위 콤마, 날짜 포맷
   share_plus: ^11.0.0 # 영수증 이미지 공유/저장 (iOS 공유 시트 → '이미지 저장')
+  url_launcher: ^6.3.3 # 토스·카카오페이 송금 링크 열기
 
   # ▼ 2단계(광고 연동) 때 주석 해제 — Info.plist 설정이 필요해서 지금은 꺼둡니다.
   # google_mobile_ads: ^6.0.0
