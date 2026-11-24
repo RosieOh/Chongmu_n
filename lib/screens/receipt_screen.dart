@@ -1,0 +1,1038 @@
+import 'dart:ui' as ui;
+
+import 'package:material_ui/material_ui.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
+import 'package:intl/intl.dart';
+import 'package:share_plus/share_plus.dart';
+
+import '../models/round_item.dart';
+import '../theme/app_theme.dart';
+import 'settings_screen.dart';
+
+/// ② 결과 화면 — 모바일 정산 영수증
+class ReceiptScreen extends StatefulWidget {
+  const ReceiptScreen({super.key, required this.settlement});
+
+  final Settlement settlement;
+
+  @override
+  State<ReceiptScreen> createState() => _ReceiptScreenState();
+}
+
+class _ReceiptScreenState extends State<ReceiptScreen> {
+  final GlobalKey _receiptKey = GlobalKey();
+  final DateTime _now = DateTime.now();
+
+  late final TextEditingController _bankCtrl =
+      TextEditingController(text: AppStorage.bankName);
+  late final TextEditingController _holderCtrl =
+      TextEditingController(text: AppStorage.accountHolder);
+  late final TextEditingController _accountCtrl =
+      TextEditingController(text: AppStorage.accountNumber);
+
+  late final List<PersonResult> _results = widget.settlement.buildResults();
+
+  final FocusNode _bankFocus = FocusNode();
+  final FocusNode _accountFocus = FocusNode();
+
+  bool _saving = false;
+
+  /// 계좌가 비어 있을 때만 상단 안내 배너 표시 (누르면 닫힘)
+  bool _showNudge = AppStorage.accountNumber.isEmpty;
+
+  @override
+  void dispose() {
+    _bankCtrl.dispose();
+    _holderCtrl.dispose();
+    _accountCtrl.dispose();
+    _bankFocus.dispose();
+    _accountFocus.dispose();
+    super.dispose();
+  }
+
+  /// 계좌 입력칸으로 이동 (포커스가 잡히면 화면이 자동으로 스크롤됩니다)
+  void _goToAccount() {
+    HapticFeedback.lightImpact();
+    setState(() => _showNudge = false);
+    if (_bankCtrl.text.trim().isEmpty) {
+      _bankFocus.requestFocus();
+    } else {
+      _accountFocus.requestFocus();
+    }
+  }
+
+  // ───────────────── 입금 확인 ─────────────────
+
+  bool _isPaid(PersonResult p) => widget.settlement.isPaid(p.member.id);
+
+  void _togglePaid(PersonResult p) {
+    final s = widget.settlement;
+    final nowPaid = s.togglePaid(p.member.id);
+    final allPaid = _results.every(_isPaid);
+    if (nowPaid && allPaid) {
+      HapticFeedback.mediumImpact();
+      _toast('🎉 모두 입금 완료! 수고했어요, 총무님');
+    } else {
+      HapticFeedback.lightImpact();
+    }
+    setState(() {});
+    AppStorage.saveSettlement(s);
+  }
+
+  String _buildReminderText() {
+    final s = widget.settlement;
+    final title = s.title.trim().isEmpty ? '모임' : s.title.trim();
+    final b = StringBuffer()
+      ..writeln('📢 [$title] 정산 입금 안내')
+      ..writeln('아직 입금 확인이 안 된 분들이에요 🙏')
+      ..writeln();
+    for (final p in _results.where((p) => !_isPaid(p))) {
+      b.writeln('· ${p.member.name}  ${Fmt.won(p.pay)}');
+    }
+    final account = _accountLine();
+    if (account.isNotEmpty) {
+      b
+        ..writeln()
+        ..writeln('🏦 $account');
+    }
+    return b.toString().trimRight();
+  }
+
+  Future<void> _copyReminder() async {
+    HapticFeedback.lightImpact();
+    await Clipboard.setData(ClipboardData(text: _buildReminderText()));
+    if (!mounted) return;
+    _toast('독촉 메시지 복사 완료! 단톡방에 붙여넣기 하세요');
+  }
+
+  void _toast(String msg) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(
+        content: Text(msg),
+        duration: const Duration(seconds: 2),
+      ));
+  }
+
+  // ───────────────── 카톡 텍스트 ─────────────────
+
+  String _buildShareText(bool isPro) {
+    final s = widget.settlement;
+    final b = StringBuffer();
+    final title = s.title.trim().isEmpty ? '모임' : s.title.trim();
+
+    b.writeln('📢 [$title] 정산 안내');
+    b.writeln(DateFormat('yyyy.MM.dd').format(_now));
+    b.writeln();
+    b.writeln('🧾 차수별 내역');
+    for (var i = 0; i < s.rounds.length; i++) {
+      final r = s.rounds[i];
+      if (r.amount <= 0) continue;
+      b.writeln('· ${s.roundLabel(i)}  ${Fmt.won(r.amount)} (${r.headCount}명)');
+    }
+    b.writeln('= 총 ${Fmt.won(s.totalSpent)}');
+    b.writeln();
+    b.writeln('💸 1인별 입금액');
+    for (final p in _results) {
+      b.writeln('· ${p.member.name}  ${Fmt.won(p.pay)}${_isPaid(p) ? ' ✅입금완료' : ''}');
+    }
+
+    final account = _accountLine();
+    if (account.isNotEmpty) {
+      b.writeln();
+      b.writeln('🏦 입금 계좌');
+      b.writeln(account);
+    }
+
+    b.writeln();
+    b.writeln('※ ${Fmt.number(s.roundUnit)}원 단위 올림 정산');
+    if (!isPro) b.writeln('— 똑똑한 총무 앱으로 정산했어요');
+    return b.toString().trimRight();
+  }
+
+  String _accountLine() {
+    final bank = _bankCtrl.text.trim();
+    final number = _accountCtrl.text.trim();
+    final holder = _holderCtrl.text.trim();
+    if (number.isEmpty) return '';
+    final head = [bank, number].where((e) => e.isNotEmpty).join(' ');
+    return holder.isEmpty ? head : '$head ($holder)';
+  }
+
+  Future<void> _copyText() async {
+    HapticFeedback.lightImpact();
+    await Clipboard.setData(
+      ClipboardData(text: _buildShareText(ProManager.instance.isPro.value)),
+    );
+    if (!mounted) return;
+    _toast(_accountLine().isEmpty
+        ? '복사 완료! (계좌를 입력하면 함께 복사돼요)'
+        : '복사 완료! 카톡 대화방에 붙여넣기 하세요 💬');
+  }
+
+  // ───────────────── 영수증 이미지 ─────────────────
+
+  Future<void> _saveImage(BuildContext buttonContext) async {
+    HapticFeedback.lightImpact();
+    FocusScope.of(context).unfocus();
+
+    // iPad 공유 시트 위치 (아이폰에선 무시됨)
+    final box = buttonContext.findRenderObject() as RenderBox?;
+    final origin = box == null ? null : box.localToGlobal(Offset.zero) & box.size;
+
+    // ───────── 🎬 보상형 광고 연동 위치 ─────────
+    // TODO(AdMob 2단계): 무료 사용자는 RewardedAd 를 먼저 보여주고,
+    // onUserEarnedReward 콜백 안에서 아래 캡처/공유 로직을 실행하세요.
+    // if (!ProManager.instance.isPro.value) {
+    //   final rewarded = await showRewardedAd();
+    //   if (!rewarded) return;
+    // }
+    // ───────────────────────────────────────────
+
+    setState(() => _saving = true);
+    try {
+      await WidgetsBinding.instance.endOfFrame;
+      final boundary = _receiptKey.currentContext?.findRenderObject()
+          as RenderRepaintBoundary?;
+      if (boundary == null) throw StateError('receipt not ready');
+
+      final image = await boundary.toImage(pixelRatio: 3);
+      final data = await image.toByteData(format: ui.ImageByteFormat.png);
+      image.dispose();
+      if (data == null) throw StateError('encode failed');
+
+      final bytes = data.buffer.asUint8List();
+      final fileName =
+          'chongmu_${DateFormat('yyyyMMdd_HHmm').format(_now)}.png';
+
+      // iOS 공유 시트가 열리면 '이미지 저장'을 눌러 사진첩에 저장할 수 있어요.
+      await SharePlus.instance.share(
+        ShareParams(
+          files: [XFile.fromData(bytes, mimeType: 'image/png', name: fileName)],
+          sharePositionOrigin: origin,
+        ),
+      );
+    } catch (_) {
+      if (mounted) _toast('이미지를 만들지 못했어요. 다시 시도해 주세요');
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  // ───────────────── UI ─────────────────
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<bool>(
+      valueListenable: ProManager.instance.isPro,
+      builder: (context, isPro, _) {
+        return GestureDetector(
+          onTap: () => FocusScope.of(context).unfocus(),
+          child: Scaffold(
+            appBar: AppBar(title: const Text('정산 영수증')),
+            body: SingleChildScrollView(
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (_showNudge) ...[
+                    _AccountNudge(onTap: _goToAccount),
+                    const SizedBox(height: 4),
+                  ],
+                  RepaintBoundary(
+                    key: _receiptKey,
+                    child: Container(
+                      color: AppColors.background,
+                      padding: const EdgeInsets.all(12),
+                      child: _ReceiptPaper(
+                        settlement: widget.settlement,
+                        results: _results,
+                        date: _now,
+                        accountLine: _accountLine(),
+                        showWatermark: !isPro,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  _buildPaymentCard(),
+                  const SizedBox(height: 12),
+                  _buildAccountCard(),
+                ],
+              ),
+            ),
+            bottomNavigationBar: _buildBottomBar(isPro),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildPaymentCard() {
+    final total = Settlement.totalCollected(_results);
+    final paid = _results.where(_isPaid).toList();
+    final received = Settlement.totalCollected(paid);
+    final remain = total - received;
+    final allPaid = paid.length == _results.length;
+    final progress = _results.isEmpty ? 0.0 : paid.length / _results.length;
+
+    return Container(
+      decoration: AppDecor.card,
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.fact_check_rounded,
+                  color: AppColors.primary, size: 20),
+              const SizedBox(width: 8),
+              const Text(
+                '입금 확인',
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.darkText,
+                ),
+              ),
+              const Spacer(),
+              Text(
+                '${paid.length}/${_results.length}명',
+                style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w900,
+                  color: AppColors.primary,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            allPaid ? '🎉 모두 입금 완료! 수고했어요, 총무님' : '입금한 사람을 눌러서 체크하세요',
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: allPaid ? FontWeight.w700 : FontWeight.w500,
+              color: allPaid ? AppColors.primary : AppColors.subText,
+            ),
+          ),
+          const SizedBox(height: 12),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(6),
+            child: TweenAnimationBuilder<double>(
+              tween: Tween<double>(end: progress),
+              duration: const Duration(milliseconds: 300),
+              curve: Curves.easeOutCubic,
+              builder: (context, v, _) => LinearProgressIndicator(
+                value: v,
+                minHeight: 8,
+                backgroundColor: AppColors.background,
+                color: AppColors.primary,
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              const Text('받은 금액 ',
+                  style: TextStyle(fontSize: 12, color: AppColors.subText)),
+              Text(
+                Fmt.won(received),
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.darkText,
+                ),
+              ),
+              const Spacer(),
+              const Text('남은 금액 ',
+                  style: TextStyle(fontSize: 12, color: AppColors.subText)),
+              Text(
+                Fmt.won(remain),
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w800,
+                  color: remain > 0 ? AppColors.danger : AppColors.primary,
+                ),
+              ),
+            ],
+          ),
+          const Padding(
+            padding: EdgeInsets.only(top: 12, bottom: 4),
+            child: Divider(),
+          ),
+          for (final p in _results)
+            _PaidRow(
+              name: p.member.name,
+              amount: p.pay,
+              paid: _isPaid(p),
+              onTap: () => _togglePaid(p),
+            ),
+          if (!allPaid) ...[
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              height: 48,
+              child: OutlinedButton.icon(
+                onPressed: _copyReminder,
+                icon: const Icon(Icons.notifications_active_outlined, size: 18),
+                label: const Text('미입금자 독촉 메시지 복사'),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAccountCard() {
+    return Container(
+      decoration: AppDecor.card,
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.account_balance_rounded,
+                  color: AppColors.primary, size: 20),
+              const SizedBox(width: 8),
+              const Text(
+                '내 입금 계좌',
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.darkText,
+                ),
+              ),
+              const Spacer(),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: AppColors.primaryLight,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Text(
+                  '자동 저장',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.primary,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                flex: 2,
+                child: TextField(
+                  controller: _bankCtrl,
+                  focusNode: _bankFocus,
+                  textInputAction: TextInputAction.next,
+                  decoration: AppDecor.boxInput('은행 (예: 카카오뱅크)'),
+                  onChanged: (v) {
+                    AppStorage.setBankName(v.trim());
+                    setState(() {});
+                  },
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                flex: 1,
+                child: TextField(
+                  controller: _holderCtrl,
+                  textInputAction: TextInputAction.next,
+                  decoration: AppDecor.boxInput('예금주'),
+                  onChanged: (v) {
+                    AppStorage.setAccountHolder(v.trim());
+                    setState(() {});
+                  },
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _accountCtrl,
+            focusNode: _accountFocus,
+            keyboardType: TextInputType.text,
+            textInputAction: TextInputAction.done,
+            decoration: AppDecor.boxInput('계좌번호 (예: 3333-01-1234567)'),
+            onChanged: (v) {
+              AppStorage.setAccountNumber(v.trim());
+              setState(() {});
+            },
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            '입력한 계좌는 이 휴대폰에만 저장되고, 영수증과 카톡 텍스트에 함께 표시돼요.',
+            style: TextStyle(fontSize: 12, color: AppColors.subText),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBottomBar(bool isPro) {
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.cardBg,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.06),
+            blurRadius: 12,
+            offset: const Offset(0, -2),
+          ),
+        ],
+      ),
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+          child: Row(
+            children: [
+              Expanded(
+                child: SizedBox(
+                  height: 54,
+                  child: ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.kakao,
+                      foregroundColor: AppColors.kakaoText,
+                      padding: const EdgeInsets.symmetric(horizontal: 10),
+                    ),
+                    onPressed: _copyText,
+                    icon: const Icon(Icons.chat_bubble_rounded, size: 18),
+                    label: const FittedBox(child: Text('카톡 정산 텍스트 복사')),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Builder(
+                  builder: (buttonContext) => SizedBox(
+                    height: 54,
+                    child: ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 10),
+                      ),
+                      onPressed: _saving ? null : () => _saveImage(buttonContext),
+                      icon: _saving
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : const Icon(Icons.download_rounded, size: 20),
+                      label: FittedBox(
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Text('영수증 이미지로 저장'),
+                            if (!isPro) ...[
+                              const SizedBox(width: 6),
+                              // 🎬 보상형 광고 연동 예정 표시
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 5, vertical: 1),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withValues(alpha: 0.25),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: const Text(
+                                  'AD',
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w900,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 입금 확인 체크 행
+class _PaidRow extends StatelessWidget {
+  const _PaidRow({
+    required this.name,
+    required this.amount,
+    required this.paid,
+    required this.onTap,
+  });
+
+  final String name;
+  final int amount;
+  final bool paid;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      checked: paid,
+      label: '$name 입금 확인',
+      child: InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
+          child: Row(
+            children: [
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 180),
+                width: 26,
+                height: 26,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: paid ? AppColors.primary : AppColors.cardBg,
+                  border: Border.all(
+                    color: paid ? AppColors.primary : AppColors.hint,
+                    width: 1.5,
+                  ),
+                ),
+                child: paid
+                    ? const Icon(Icons.check_rounded, size: 18, color: Colors.white)
+                    : null,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  name,
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                    color: paid ? AppColors.subText : AppColors.darkText,
+                  ),
+                ),
+              ),
+              if (paid) ...[
+                const _PaidTag(),
+                const SizedBox(width: 8),
+              ],
+              Text(
+                Fmt.won(amount),
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w800,
+                  color: paid ? AppColors.subText : AppColors.darkText,
+                  decoration: paid ? TextDecoration.lineThrough : null,
+                  decorationColor: AppColors.subText,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// '입금완료' 작은 태그 (영수증 이미지에도 표시됨)
+class _PaidTag extends StatelessWidget {
+  const _PaidTag();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: AppColors.primaryLight,
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: const Text(
+        '입금완료',
+        style: TextStyle(
+          fontSize: 10,
+          fontWeight: FontWeight.w800,
+          color: AppColors.primary,
+        ),
+      ),
+    );
+  }
+}
+
+/// 계좌 미입력 시 상단 안내 배너
+class _AccountNudge extends StatelessWidget {
+  const _AccountNudge({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: AppColors.primaryLight,
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: onTap,
+        child: const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          child: Row(
+            children: [
+              Icon(Icons.account_balance_wallet_outlined,
+                  size: 20, color: AppColors.primary),
+              SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  '입금 계좌를 입력하면 영수증과 카톡 텍스트에 함께 표시돼요',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.primary,
+                  ),
+                ),
+              ),
+              SizedBox(width: 8),
+              Text(
+                '입력하기 ›',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.primary,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ═════════════════════════════════════════════
+// 종이 영수증 위젯 (이 부분이 그대로 이미지로 저장됩니다)
+// ═════════════════════════════════════════════
+
+class _ReceiptPaper extends StatelessWidget {
+  const _ReceiptPaper({
+    required this.settlement,
+    required this.results,
+    required this.date,
+    required this.accountLine,
+    required this.showWatermark,
+  });
+
+  final Settlement settlement;
+  final List<PersonResult> results;
+  final DateTime date;
+  final String accountLine;
+  final bool showWatermark;
+
+  static const _num = [ui.FontFeature.tabularFigures()];
+
+  static const _sub = TextStyle(fontSize: 12, color: AppColors.subText);
+  static const _body = TextStyle(
+    fontSize: 14,
+    fontWeight: FontWeight.w600,
+    color: AppColors.darkText,
+    fontFeatures: _num,
+  );
+  static const _bold = TextStyle(
+    fontSize: 15,
+    fontWeight: FontWeight.w800,
+    color: AppColors.darkText,
+    fontFeatures: _num,
+  );
+  static const _section = TextStyle(
+    fontSize: 13,
+    fontWeight: FontWeight.w800,
+    color: AppColors.subText,
+    letterSpacing: 0.5,
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    final s = settlement;
+    final collected = Settlement.totalCollected(results);
+    final surplus = collected - s.totalSpent;
+    final title = s.title.trim().isEmpty ? '우리 모임' : s.title.trim();
+
+    return ClipPath(
+      clipper: _ZigzagClipper(),
+      child: Container(
+        color: AppColors.cardBg,
+        padding: const EdgeInsets.fromLTRB(20, 24, 20, 30),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // ── 헤더 ──
+            const Text(
+              'RECEIPT · 정산 영수증',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w800,
+                color: AppColors.primary,
+                letterSpacing: 1.5,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              title,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w900,
+                color: AppColors.darkText,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              DateFormat('yyyy.MM.dd HH:mm').format(date),
+              textAlign: TextAlign.center,
+              style: _sub,
+            ),
+            const _DashedLine(),
+
+            // ── 총 지출액 ──
+            Row(
+              children: [
+                const Text('총 지출액', style: _bold),
+                const Spacer(),
+                Text(
+                  Fmt.won(s.totalSpent),
+                  style: const TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w900,
+                    color: AppColors.darkText,
+                    fontFeatures: _num,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+
+            // ── 차수별 상세 ──
+            const Text('차수별 내역', style: _section),
+            const SizedBox(height: 8),
+            for (var i = 0; i < s.rounds.length; i++)
+              if (s.rounds[i].amount > 0) _roundRow(i),
+            const _DashedLine(),
+
+            // ── 인원별 입금액 ──
+            const Text('인원별 입금액', style: _section),
+            const SizedBox(height: 8),
+            for (final p in results) _personRow(p),
+            const _DashedLine(),
+
+            // ── 합계 / 자투리 ──
+            _row('총 걷는 금액', Fmt.won(collected), _body),
+            const SizedBox(height: 6),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: AppColors.primaryLight,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Row(
+                children: [
+                  const Text(
+                    '총무 자투리 잔액',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.primary,
+                    ),
+                  ),
+                  const Spacer(),
+                  Text(
+                    '${surplus >= 0 ? '+' : ''}${Fmt.won(surplus)}',
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w900,
+                      color: AppColors.primary,
+                      fontFeatures: _num,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              '${Fmt.number(s.roundUnit)}원 단위 올림으로 생긴 금액이에요',
+              style: _sub,
+              textAlign: TextAlign.right,
+            ),
+
+            // ── 입금 계좌 ──
+            if (accountLine.isNotEmpty) ...[
+              const SizedBox(height: 14),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  border: Border.all(color: AppColors.border),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.account_balance_rounded,
+                        size: 18, color: AppColors.primary),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        accountLine,
+                        style: _body,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+
+            // ── 로고 워터마크 (PRO 구매 시 제거) ──
+            if (showWatermark) ...[
+              const SizedBox(height: 20),
+              const Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  AppLogo(size: 18),
+                  SizedBox(width: 6),
+                  Text(
+                    '똑똑한 총무로 정산했어요',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.hint,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _row(String left, String right, TextStyle style) {
+    return Row(
+      children: [
+        Expanded(child: Text(left, style: style)),
+        const SizedBox(width: 12),
+        Text(right, style: style),
+      ],
+    );
+  }
+
+  Widget _roundRow(int i) {
+    final r = settlement.rounds[i];
+    final unit = settlement.roundUnit;
+    final detail = StringBuffer('${r.headCount}명 · 1인 ${Fmt.won(r.perPerson(unit))}');
+    if (r.hasSober) {
+      detail.write(' · 술X ${Fmt.won(r.soberPerPerson(unit))}');
+    }
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _row(settlement.roundLabel(i), Fmt.won(r.amount), _body),
+          const SizedBox(height: 2),
+          Text(detail.toString(), style: _sub),
+        ],
+      ),
+    );
+  }
+
+  Widget _personRow(PersonResult p) {
+    final rounds = settlement.rounds;
+    final attended = <String>[
+      for (var i = 0; i < rounds.length; i++)
+        if (p.roundShares.containsKey(rounds[i].id))
+          rounds[i].hasSober && rounds[i].soberIds.contains(p.member.id)
+              ? '${i + 1}차(술X)'
+              : '${i + 1}차',
+    ];
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Flexible(child: Text(p.member.name, style: _body)),
+                    if (settlement.isPaid(p.member.id)) ...[
+                      const SizedBox(width: 6),
+                      const _PaidTag(),
+                    ],
+                  ],
+                ),
+                const SizedBox(height: 2),
+                Text(attended.join(' · '), style: _sub),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          Text(Fmt.won(p.pay), style: _bold),
+        ],
+      ),
+    );
+  }
+}
+
+class _DashedLine extends StatelessWidget {
+  const _DashedLine();
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 16),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final count = (constraints.maxWidth / 8).floor();
+          return Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: List.generate(
+              count,
+              (_) => Container(width: 4, height: 1.2, color: AppColors.hint),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+/// 영수증 하단 지그재그(톱니) 모양
+class _ZigzagClipper extends CustomClipper<Path> {
+  @override
+  Path getClip(Size size) {
+    const tooth = 12.0;
+    const depth = 6.0;
+    final path = Path()
+      ..lineTo(size.width, 0)
+      ..lineTo(size.width, size.height - depth);
+    var x = size.width;
+    var down = true;
+    while (x > 0) {
+      x -= tooth / 2;
+      if (x < 0) x = 0;
+      path.lineTo(x, down ? size.height : size.height - depth);
+      down = !down;
+    }
+    path.close();
+    return path;
+  }
+
+  @override
+  bool shouldReclip(covariant CustomClipper<Path> oldClipper) => false;
+}
