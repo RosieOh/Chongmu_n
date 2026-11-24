@@ -73,6 +73,38 @@ void main() {
         20);
   });
 
+  test('개별 추가 금액: 먼저 빼고 나머지 N빵 + 참석 해제 시 정리', () {
+    final s = Settlement.sample();
+    final r = s.rounds.first; // 120,000원 / 4명
+    final minsu = s.members[1];
+    r.setExtra(minsu.id, 20000);
+    expect(r.sharedAmount, 100000);
+    expect(r.perPerson(100), 25000);
+    expect(r.exactShareFor(minsu.id), 45000);
+    expect(r.exactShareFor(s.members[0].id), 25000);
+    // 총액은 그대로 맞아야 함
+    final sum = r.participantIds
+        .fold<double>(0, (acc, id) => acc + r.exactShareFor(id));
+    expect(sum, closeTo(120000, 0.001));
+
+    final restored = RoundItem.fromJson(r.toJson());
+    expect(restored.extraOf(minsu.id), 20000);
+
+    r.setExtra(minsu.id, 0);
+    expect(r.extras, isEmpty);
+
+    // 참석자가 아니면 설정 안 됨, 참석 해제하면 추가금도 삭제
+    r.setExtra(minsu.id, 5000);
+    r.removeParticipant(minsu.id);
+    expect(r.extras, isEmpty);
+    r.setExtra(minsu.id, 5000);
+    expect(r.extras, isEmpty);
+
+    r.setExtra(s.members[0].id, 999999);
+    expect(r.extrasOverflow, isTrue);
+    expect(r.sharedAmount, 0);
+  });
+
   group('지난 정산 기록', () {
     setUp(() async {
       SharedPreferences.setMockInitialValues({});

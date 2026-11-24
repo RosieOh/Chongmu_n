@@ -993,6 +993,9 @@ class _ReceiptPaper extends StatelessWidget {
     if (r.hasSober) {
       detail.write(' · 술X ${Fmt.won(r.soberPerPerson(unit))}');
     }
+    if (r.extras.isNotEmpty) {
+      detail.write(' · 개별 추가 ${Fmt.won(r.extrasTotal)}');
+    }
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: Column(
@@ -1006,14 +1009,21 @@ class _ReceiptPaper extends StatelessWidget {
     );
   }
 
+  /// '1차', '2차(술X)', '1차(+12,000)' 처럼 참석 차수 표시
+  String _attendLabel(int i, RoundItem r, String memberId) {
+    final tags = <String>[
+      if (r.hasSober && r.soberIds.contains(memberId)) '술X',
+      if (r.extraOf(memberId) > 0) '+${Fmt.number(r.extraOf(memberId))}',
+    ];
+    return tags.isEmpty ? '${i + 1}차' : '${i + 1}차(${tags.join(', ')})';
+  }
+
   Widget _personRow(PersonResult p) {
     final rounds = settlement.rounds;
     final attended = <String>[
       for (var i = 0; i < rounds.length; i++)
         if (p.roundShares.containsKey(rounds[i].id))
-          rounds[i].hasSober && rounds[i].soberIds.contains(p.member.id)
-              ? '${i + 1}차(술X)'
-              : '${i + 1}차',
+          _attendLabel(i, rounds[i], p.member.id),
     ];
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),

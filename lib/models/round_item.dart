@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -63,7 +64,9 @@ class RoundItem {
     this.soberDiscount = false,
     Set<String>? soberIds,
     int discountPercent = defaultDiscount,
-  })  : discountPercent = discountOptions.contains(discountPercent)
+    Map<String, int>? extras,
+  })  : extras = extras ?? <String, int>{},
+        discountPercent = discountOptions.contains(discountPercent)
             ? discountPercent
             : defaultDiscount,
         participantIds = participantIds ?? <String>{},
@@ -92,6 +95,29 @@ class RoundItem {
   /// 술 안 마신 사람이 내는 비율 (20% 할인 → 0.8)
   double get soberRate => (100 - discountPercent) / 100;
 
+  /// 개별 추가 금액 (멤버 ID → 금액). 혼자 시킨 메뉴처럼 그 사람만 내는 돈.
+  /// 결제 금액에서 추가금을 먼저 빼고, 남은 금액을 N빵합니다.
+  final Map<String, int> extras;
+
+  int get extrasTotal => extras.values.fold(0, (sum, v) => sum + v);
+
+  int extraOf(String memberId) => extras[memberId] ?? 0;
+
+  /// 추가금이 결제 금액보다 큰 잘못된 입력인지
+  bool get extrasOverflow => extrasTotal > amount;
+
+  /// N빵할 공통 금액 (결제 금액 - 개별 추가금)
+  int get sharedAmount => math.max(0, amount - extrasTotal);
+
+  /// 추가금 설정 (0 이하면 삭제). 참석자에게만 설정할 수 있어요.
+  void setExtra(String memberId, int value) {
+    if (value <= 0 || !participantIds.contains(memberId)) {
+      extras.remove(memberId);
+    } else {
+      extras[memberId] = value;
+    }
+  }
+
   int get headCount => participantIds.length;
 
   bool get hasSober => soberDiscount && soberIds.isNotEmpty;
@@ -107,29 +133,30 @@ class RoundItem {
     return w;
   }
 
-  /// 특정 멤버가 이 차수에서 내야 할 정확한 금액 (올림 전)
+  /// 특정 멤버가 이 차수에서 내야 할 정확한 금액 (올림 전, 추가금 포함)
   double exactShareFor(String memberId) {
     if (amount <= 0 || !participantIds.contains(memberId)) return 0;
     final tw = _totalWeight;
     if (tw <= 0) return 0;
-    return amount * weightOf(memberId) / tw;
+    return sharedAmount * weightOf(memberId) / tw + extraOf(memberId);
   }
 
-  /// 카드에 표시할 1인당 금액 (술 마신 사람 기준, 올림)
+  /// 카드에 표시할 1인당 금액 (술 마신 사람 기준, 추가금 제외, 올림)
   int perPerson(int unit) {
     if (amount <= 0 || headCount == 0) return 0;
-    return roundUpTo(amount / _totalWeight, unit);
+    return roundUpTo(sharedAmount / _totalWeight, unit);
   }
 
-  /// 술 안 마신 사람의 1인당 금액 (올림)
+  /// 술 안 마신 사람의 1인당 금액 (추가금 제외, 올림)
   int soberPerPerson(int unit) {
     if (amount <= 0 || headCount == 0) return 0;
-    return roundUpTo(amount * soberRate / _totalWeight, unit);
+    return roundUpTo(sharedAmount * soberRate / _totalWeight, unit);
   }
 
   void removeParticipant(String memberId) {
     participantIds.remove(memberId);
     soberIds.remove(memberId);
+    extras.remove(memberId);
   }
 
   Map<String, dynamic> toJson() => {
@@ -140,6 +167,7 @@ class RoundItem {
         'soberDiscount': soberDiscount,
         'soberIds': soberIds.toList(),
         'discountPercent': discountPercent,
+        'extras': Map<String, int>.of(extras),
       };
 
   factory RoundItem.fromJson(Map<String, dynamic> json) {
@@ -147,6 +175,14 @@ class RoundItem {
         Set<String>.from((json['participantIds'] as List?) ?? const []);
     final sober = Set<String>.from((json['soberIds'] as List?) ?? const [])
       ..retainAll(participants);
+    final extras = <String, int>{};
+    final rawExtras = json['extras'];
+    if (rawExtras is Map) {
+      rawExtras.forEach((k, v) {
+        final value = (v as num?)?.toInt() ?? 0;
+        if (value > 0 && participants.contains(k)) extras[k as String] = value;
+      });
+    }
     return RoundItem(
       id: json['id'] as String,
       name: (json['name'] as String?) ?? '',
@@ -156,6 +192,7 @@ class RoundItem {
       soberIds: sober,
       discountPercent:
           (json['discountPercent'] as num?)?.toInt() ?? defaultDiscount,
+      extras: extras,
     );
   }
 }

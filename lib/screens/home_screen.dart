@@ -264,6 +264,11 @@ class _HomeScreenState extends State<HomeScreen> {
       _toast('참석 인원을 선택해 주세요');
       return;
     }
+    final overflow = _s.rounds.indexWhere((r) => r.extrasOverflow);
+    if (overflow >= 0) {
+      _toast('${overflow + 1}차의 개별 추가 금액이 결제 금액보다 커요');
+      return;
+    }
     await AppStorage.saveSettlement(_s);
     if (!mounted) return;
     await Navigator.of(context).push(
@@ -778,12 +783,93 @@ class _HomeScreenState extends State<HomeScreen> {
                           ],
                         ),
                 ),
+                const SizedBox(height: 6),
+                _buildExtras(r, attendees),
               ],
             ),
           ),
         ],
       ),
     );
+  }
+
+  /// 개별 추가 금액 (혼자 시킨 메뉴 등)
+  Widget _buildExtras(RoundItem r, List<Member> attendees) {
+    final withExtra = attendees.where((m) => r.extraOf(m.id) > 0).toList();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(Icons.add_card_rounded,
+                size: 18, color: context.colors.subText),
+            const SizedBox(width: 6),
+            const Expanded(child: Text('개별 추가 금액', style: _Txt.label)),
+            TextButton.icon(
+              onPressed: () => _editExtra(r),
+              style: TextButton.styleFrom(
+                foregroundColor: AppColors.primary,
+                visualDensity: VisualDensity.compact,
+              ),
+              icon: const Icon(Icons.add_rounded, size: 18),
+              label: const Text(
+                '추가',
+                style: TextStyle(fontWeight: FontWeight.w800),
+              ),
+            ),
+          ],
+        ),
+        if (withExtra.isEmpty)
+          Text(
+            '혼자 시킨 메뉴가 있으면 그 사람만 따로 내게 할 수 있어요',
+            style: _Txt.caption(context),
+          )
+        else ...[
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final m in withExtra)
+                _PillButton(
+                  label: '${m.name} +${Fmt.won(r.extraOf(m.id))}',
+                  icon: Icons.edit_rounded,
+                  onTap: () => _editExtra(r, m),
+                ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            r.extrasOverflow
+                ? '⚠️ 추가 금액 합계가 결제 금액보다 커요'
+                : '추가 ${Fmt.won(r.extrasTotal)}을 뺀 ${Fmt.won(r.sharedAmount)}을 나눠요',
+            style: r.extrasOverflow
+                ? const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.danger,
+                  )
+                : _Txt.caption(context),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Future<void> _editExtra(RoundItem r, [Member? member]) async {
+    HapticFeedback.lightImpact();
+    FocusScope.of(context).unfocus();
+    final attendees =
+        _s.members.where((m) => r.participantIds.contains(m.id)).toList();
+    final res = await showDialog<_ExtraResult>(
+      context: context,
+      builder: (_) => _ExtraDialog(
+        members: attendees,
+        initialMemberId: member?.id,
+        initialAmount: member == null ? 0 : r.extraOf(member.id),
+      ),
+    );
+    if (res == null || !mounted) return;
+    _update(() => r.setExtra(res.memberId, res.amount));
   }
 
   Widget _buildRoundingCard() {
@@ -1622,6 +1708,124 @@ class _NameDialogState extends State<_NameDialog> {
           TextButton(
             onPressed: () =>
                 Navigator.of(context).pop(const _NameResult.remove()),
+            child: const Text('삭제', style: TextStyle(color: AppColors.danger)),
+          ),
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: Text('취소', style: TextStyle(color: context.colors.subText)),
+        ),
+        TextButton(
+          onPressed: _submit,
+          child: const Text(
+            '저장',
+            style: TextStyle(
+                color: AppColors.primary, fontWeight: FontWeight.w800),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ── 개별 추가 금액 다이얼로그 ──
+
+class _ExtraResult {
+  const _ExtraResult(this.memberId, this.amount);
+
+  final String memberId;
+
+  /// 0 이면 삭제
+  final int amount;
+}
+
+class _ExtraDialog extends StatefulWidget {
+  const _ExtraDialog({
+    required this.members,
+    this.initialMemberId,
+    this.initialAmount = 0,
+  });
+
+  final List<Member> members;
+  final String? initialMemberId;
+  final int initialAmount;
+
+  @override
+  State<_ExtraDialog> createState() => _ExtraDialogState();
+}
+
+class _ExtraDialogState extends State<_ExtraDialog> {
+  late String? _memberId = widget.initialMemberId ??
+      (widget.members.isEmpty ? null : widget.members.first.id);
+  late final TextEditingController _c = TextEditingController(
+    text: widget.initialAmount > 0 ? Fmt.number(widget.initialAmount) : '',
+  );
+
+  bool get _editing => widget.initialMemberId != null;
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final id = _memberId;
+    final v = int.tryParse(_c.text.replaceAll(',', '')) ?? 0;
+    if (id == null || (v <= 0 && !_editing)) return;
+    Navigator.of(context).pop(_ExtraResult(id, v));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: context.colors.card,
+      surfaceTintColor: Colors.transparent,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+      title: Text(
+        _editing ? '추가 금액 수정' : '개별 추가 금액',
+        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+      ),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('누가 따로 시켰나요?', style: _Txt.caption(context)),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: [
+                for (final m in widget.members)
+                  _SelectChip(
+                    label: m.name,
+                    dense: true,
+                    selected: _memberId == m.id,
+                    onTap: _editing
+                        ? () {}
+                        : () => setState(() => _memberId = m.id),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _c,
+              autofocus: true,
+              keyboardType: TextInputType.number,
+              inputFormatters: [ThousandsFormatter()],
+              textInputAction: TextInputAction.done,
+              onSubmitted: (_) => _submit(),
+              decoration: AppDecor.boxInput(context, '금액 (예: 12,000)')
+                  .copyWith(suffixText: '원'),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        if (_editing)
+          TextButton(
+            onPressed: () => Navigator.of(context)
+                .pop(_ExtraResult(widget.initialMemberId!, 0)),
             child: const Text('삭제', style: TextStyle(color: AppColors.danger)),
           ),
         TextButton(
