@@ -60,18 +60,26 @@ int roundMoney(double value, int unit, RoundMode mode) {
 // ─────────────────────────────────────────────
 
 class Member {
-  Member({required this.id, required this.name});
+  Member({required this.id, required this.name, this.account = ''});
 
   final String id;
   String name;
 
-  Member copy() => Member(id: id, name: name);
+  /// 이 멤버가 돈을 받을 계좌 (송금 정리에서 총무가 아닌 결제자용, 자유 입력)
+  String account;
 
-  Map<String, dynamic> toJson() => {'id': id, 'name': name};
+  Member copy() => Member(id: id, name: name, account: account);
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'name': name,
+        if (account.isNotEmpty) 'account': account,
+      };
 
   factory Member.fromJson(Map<String, dynamic> json) => Member(
         id: json['id'] as String,
         name: (json['name'] as String?) ?? '',
+        account: (json['account'] as String?) ?? '',
       );
 }
 
@@ -668,6 +676,7 @@ class AppStorage {
   static const _kOnboarded = 'onboarding_done';
   static const _kHistory = 'history_v1';
   static const _kThemeMode = 'theme_mode';
+  static const _kMemberAccounts = 'member_accounts_v1';
 
   /// 기록은 최근 100건까지만 보관 (기기 저장 공간 보호)
   static const int historyLimit = 100;
@@ -859,6 +868,33 @@ class AppStorage {
     }
     await Future.wait(writes);
     return incoming.length;
+  }
+
+  // ── 멤버별 계좌 (이름 기준으로 기억해서 다음 정산에 자동으로 채움) ──
+
+  static Map<String, String> get _memberAccounts {
+    final raw = _prefs.getString(_kMemberAccounts);
+    if (raw == null) return {};
+    try {
+      return Map<String, String>.from(jsonDecode(raw) as Map);
+    } catch (_) {
+      return {};
+    }
+  }
+
+  static String accountForName(String name) =>
+      _memberAccounts[name.trim()] ?? '';
+
+  static Future<void> rememberAccount(String name, String account) {
+    final key = name.trim();
+    if (key.isEmpty) return Future.value();
+    final map = _memberAccounts;
+    if (account.trim().isEmpty) {
+      map.remove(key);
+    } else {
+      map[key] = account.trim();
+    }
+    return _prefs.setString(_kMemberAccounts, jsonEncode(map));
   }
 
   static String get bankName => _prefs.getString(_kBank) ?? '';

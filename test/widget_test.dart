@@ -350,6 +350,18 @@ void main() {
           throwsFormatException);
     });
 
+    test('멤버 계좌: 정산에 저장 + 이름 기준으로 기억', () async {
+      final m = Member(id: 'a', name: '지영', account: '토스 1000');
+      expect(Member.fromJson(m.toJson()).account, '토스 1000');
+      expect(
+          Member(id: 'b', name: 'x').toJson().containsKey('account'), isFalse);
+
+      await AppStorage.rememberAccount(' 지영 ', '토스 1000');
+      expect(AppStorage.accountForName('지영'), '토스 1000');
+      await AppStorage.rememberAccount('지영', '');
+      expect(AppStorage.accountForName('지영'), '');
+    });
+
     test('불러온 기록을 수정해도 저장본은 그대로 (복사본)', () async {
       final s = Settlement.blank();
       s.rounds.first.amount = 50000;

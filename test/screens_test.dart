@@ -76,6 +76,12 @@ void main() {
         await pumpScreen(tester, ReceiptScreen(settlement: s), mode);
         expect(find.text('송금 확인'), findsOneWidget);
         expect(find.text('송금 정리'), findsOneWidget);
+        expect(find.text('받는 사람 계좌'), findsOneWidget);
+
+        // 영수증에서 이름을 누르면 개인별 상세
+        await tester.tap(find.text('지영').first);
+        await tester.pumpAndSettle();
+        expect(find.text('개인 메시지 복사'), findsOneWidget);
       });
 
       testWidgets('설정 화면 (화면 모드 선택)', (tester) async {
