@@ -62,11 +62,16 @@ class RoundItem {
     Set<String>? participantIds,
     this.soberDiscount = false,
     Set<String>? soberIds,
-  })  : participantIds = participantIds ?? <String>{},
+    int discountPercent = defaultDiscount,
+  })  : discountPercent = discountOptions.contains(discountPercent)
+            ? discountPercent
+            : defaultDiscount,
+        participantIds = participantIds ?? <String>{},
         soberIds = soberIds ?? <String>{};
 
-  /// 술 안 마신 사람은 80%만 냅니다 (20% 할인)
-  static const double soberRate = 0.8;
+  /// 술 안 마신 사람 할인율 선택지 (%)
+  static const List<int> discountOptions = [10, 20, 30, 50];
+  static const int defaultDiscount = 20;
 
   final String id;
   String name;
@@ -75,11 +80,17 @@ class RoundItem {
   /// 이 차수에 참석한 멤버 ID
   final Set<String> participantIds;
 
-  /// '술 안 마신 인원 20% 할인' 토글
+  /// '술 안 마신 인원 할인' 토글
   bool soberDiscount;
 
   /// 술 안 마신 멤버 ID (participantIds 의 부분집합)
   final Set<String> soberIds;
+
+  /// 술 안 마신 사람 할인율 (%) — 기본 20% (80%만 냄)
+  int discountPercent;
+
+  /// 술 안 마신 사람이 내는 비율 (20% 할인 → 0.8)
+  double get soberRate => (100 - discountPercent) / 100;
 
   int get headCount => participantIds.length;
 
@@ -128,6 +139,7 @@ class RoundItem {
         'participantIds': participantIds.toList(),
         'soberDiscount': soberDiscount,
         'soberIds': soberIds.toList(),
+        'discountPercent': discountPercent,
       };
 
   factory RoundItem.fromJson(Map<String, dynamic> json) {
@@ -142,6 +154,8 @@ class RoundItem {
       participantIds: participants,
       soberDiscount: (json['soberDiscount'] as bool?) ?? false,
       soberIds: sober,
+      discountPercent:
+          (json['discountPercent'] as num?)?.toInt() ?? defaultDiscount,
     );
   }
 }

@@ -51,6 +51,28 @@ void main() {
     expect(r.soberPerPerson(10), 21060);
   });
 
+  test('할인율 선택: 50% 할인 + 저장/불러오기, 잘못된 값은 기본 20%', () {
+    final s = Settlement.sample();
+    final r = s.rounds.first
+      ..amount = 70000
+      ..soberDiscount = true
+      ..discountPercent = 50;
+    r.soberIds.add(s.members.last.id);
+    // 가중치 합 3.5 → 술O 20,000 / 술X 10,000
+    expect(r.perPerson(100), 20000);
+    expect(r.soberPerPerson(100), 10000);
+
+    final restored = RoundItem.fromJson(r.toJson());
+    expect(restored.discountPercent, 50);
+
+    final legacy = r.toJson()..remove('discountPercent');
+    expect(RoundItem.fromJson(legacy).discountPercent, 20);
+    expect(
+        RoundItem.fromJson(r.toJson()..['discountPercent'] = 77)
+            .discountPercent,
+        20);
+  });
+
   group('지난 정산 기록', () {
     setUp(() async {
       SharedPreferences.setMockInitialValues({});

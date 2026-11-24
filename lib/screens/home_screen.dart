@@ -698,8 +698,11 @@ class _HomeScreenState extends State<HomeScreen> {
                     Icon(Icons.local_drink_outlined,
                         size: 18, color: context.colors.subText),
                     const SizedBox(width: 6),
-                    const Expanded(
-                      child: Text('술 안 마신 인원 20% 할인', style: _Txt.label),
+                    Expanded(
+                      child: Text(
+                        '술 안 마신 인원 ${r.discountPercent}% 할인',
+                        style: _Txt.label,
+                      ),
                     ),
                     Switch.adaptive(
                       value: r.soberDiscount,
@@ -721,10 +724,36 @@ class _HomeScreenState extends State<HomeScreen> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             const SizedBox(height: 4),
+                            Row(
+                              children: [
+                                Text('할인율', style: _Txt.caption(context)),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Wrap(
+                                    spacing: 6,
+                                    runSpacing: 6,
+                                    children: [
+                                      for (final p in RoundItem.discountOptions)
+                                        _SelectChip(
+                                          label: '$p%',
+                                          dense: true,
+                                          selected: r.discountPercent == p,
+                                          onTap: () {
+                                            HapticFeedback.lightImpact();
+                                            _update(
+                                                () => r.discountPercent = p);
+                                          },
+                                        ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 10),
                             Text(
                               r.soberIds.isEmpty
                                   ? '👇 술 안 마신 사람을 눌러 주세요'
-                                  : '술 안 마신 사람 ${r.soberIds.length}명은 20% 덜 내요',
+                                  : '술 안 마신 사람 ${r.soberIds.length}명은 ${r.discountPercent}% 덜 내요',
                               style: r.soberIds.isEmpty
                                   ? const TextStyle(
                                       fontSize: 12,
@@ -1095,11 +1124,15 @@ class _SelectChip extends StatelessWidget {
     required this.label,
     required this.selected,
     required this.onTap,
+    this.dense = false,
   });
 
   final String label;
   final bool selected;
   final VoidCallback onTap;
+
+  /// 작은 칩 (할인율 선택 등)
+  final bool dense;
 
   @override
   Widget build(BuildContext context) {
@@ -1108,7 +1141,9 @@ class _SelectChip extends StatelessWidget {
         onTap: onTap,
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 150),
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          padding: dense
+              ? const EdgeInsets.symmetric(horizontal: 10, vertical: 5)
+              : const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
           decoration: BoxDecoration(
             color: selected ? context.colors.primaryLight : context.colors.card,
             borderRadius: BorderRadius.circular(20),
@@ -1120,7 +1155,7 @@ class _SelectChip extends StatelessWidget {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              if (selected) ...[
+              if (selected && !dense) ...[
                 const Icon(Icons.check_rounded,
                     size: 15, color: AppColors.primary),
                 const SizedBox(width: 3),
@@ -1128,7 +1163,7 @@ class _SelectChip extends StatelessWidget {
               Text(
                 label,
                 style: TextStyle(
-                  fontSize: 14,
+                  fontSize: dense ? 13 : 14,
                   fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
                   color: selected ? AppColors.primary : context.colors.subText,
                 ),
