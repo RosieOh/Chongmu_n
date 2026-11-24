@@ -708,6 +708,76 @@ class AppStorage {
     await Future.wait(writes);
   }
 
+  // ── 백업 / 복원 (클립보드로 옮기기) ──
+
+  static const _backupApp = 'chongmu_n';
+
+  /// 지금 정산 + 지난 정산 + 계좌 정보를 JSON 문자열로.
+  /// PRO 구매 여부는 넣지 않아요 (복원은 '구매 내역 복원'으로).
+  static String exportBackup(Settlement current) => jsonEncode({
+        'app': _backupApp,
+        'version': 1,
+        'exportedAt': DateTime.now().toIso8601String(),
+        'current': current.toJson(),
+        'history': _history.map((e) => e.toJson()).toList(),
+        'account': {
+          'bank': bankName,
+          'holder': accountHolder,
+          'number': accountNumber,
+        },
+      });
+
+  /// 백업 문자열을 지난 정산에 합칩니다 (같은 정산은 백업 내용으로 갱신).
+  /// 계좌가 비어 있으면 백업의 계좌도 채워요. 합친 정산 개수를 돌려줍니다.
+  /// 형식이 맞지 않으면 [FormatException].
+  static Future<int> importBackup(String raw) async {
+    final Map<String, dynamic> data;
+    try {
+      data = Map<String, dynamic>.from(jsonDecode(raw.trim()) as Map);
+    } catch (_) {
+      throw const FormatException('백업 형식이 아니에요');
+    }
+    if (data['app'] != _backupApp) {
+      throw const FormatException('똑똑한 총무 백업이 아니에요');
+    }
+
+    final incoming = <Settlement>[
+      for (final e in (data['history'] as List?) ?? const [])
+        Settlement.fromJson(Map<String, dynamic>.from(e as Map)),
+    ];
+    final current = data['current'];
+    if (current is Map) {
+      final s = Settlement.fromJson(Map<String, dynamic>.from(current));
+      if (!s.isSample &&
+          s.totalSpent > 0 &&
+          !incoming.any((e) => e.id == s.id)) {
+        incoming.add(s);
+      }
+    }
+
+    final history = _history;
+    for (final s in incoming) {
+      history
+        ..removeWhere((e) => e.id == s.id)
+        ..add(s);
+    }
+    _sortHistory(history);
+
+    final writes = <Future<void>>[_writeHistory()];
+    final account = data['account'];
+    if (account is Map && accountNumber.isEmpty) {
+      final number = (account['number'] as String?)?.trim() ?? '';
+      if (number.isNotEmpty) {
+        writes
+          ..add(setAccountNumber(number))
+          ..add(setBankName((account['bank'] as String?)?.trim() ?? ''))
+          ..add(setAccountHolder((account['holder'] as String?)?.trim() ?? ''));
+      }
+    }
+    await Future.wait(writes);
+    return incoming.length;
+  }
+
   static String get bankName => _prefs.getString(_kBank) ?? '';
   static String get accountHolder => _prefs.getString(_kHolder) ?? '';
   static String get accountNumber => _prefs.getString(_kAccount) ?? '';

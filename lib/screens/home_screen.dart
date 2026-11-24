@@ -327,7 +327,7 @@ class _HomeScreenState extends State<HomeScreen> {
     HapticFeedback.lightImpact();
     FocusScope.of(context).unfocus();
     final action = await Navigator.of(context).push<SettingsAction>(
-      MaterialPageRoute(builder: (_) => const SettingsScreen()),
+      MaterialPageRoute(builder: (_) => SettingsScreen(current: _s)),
     );
     if (!mounted || action == null) return;
     switch (action) {

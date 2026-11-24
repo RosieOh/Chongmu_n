@@ -252,6 +252,37 @@ void main() {
       expect(AppStorage.recentMemberNames(), ['민수', '현우', '지영']);
     });
 
+    test('백업/복원: 기록·계좌 옮기기, PRO 는 제외, 잘못된 형식은 거부', () async {
+      final a = Settlement.blank()..title = 'A';
+      a.rounds.first.amount = 30000;
+      a.rounds.first.payerId = a.members[1].id;
+      await AppStorage.saveSettlement(a);
+      await AppStorage.setAccountNumber('3333-01');
+      await AppStorage.setPro(true);
+      final current = Settlement.blank()..title = '작성 중';
+      current.rounds.first.amount = 5000;
+      final backup = AppStorage.exportBackup(current);
+
+      // 새 휴대폰
+      SharedPreferences.setMockInitialValues({});
+      await AppStorage.init();
+      expect(await AppStorage.importBackup(backup), 2);
+      final history = AppStorage.loadHistory();
+      expect(history.map((e) => e.title).toSet(), {'A', '작성 중'});
+      final restored = history.firstWhere((e) => e.title == 'A');
+      expect(restored.usesTransfers, isTrue);
+      expect(AppStorage.accountNumber, '3333-01');
+      expect(AppStorage.isPro, isFalse);
+
+      // 두 번 복원해도 중복되지 않음
+      await AppStorage.importBackup(backup);
+      expect(AppStorage.loadHistory().length, 2);
+
+      expect(() => AppStorage.importBackup('hello'), throwsFormatException);
+      expect(() => AppStorage.importBackup('{"app":"other"}'),
+          throwsFormatException);
+    });
+
     test('불러온 기록을 수정해도 저장본은 그대로 (복사본)', () async {
       final s = Settlement.blank();
       s.rounds.first.amount = 50000;
