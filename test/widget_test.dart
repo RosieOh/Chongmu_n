@@ -1,5 +1,6 @@
 import 'package:chongmu_n/models/round_item.dart';
 import 'package:chongmu_n/screens/history_screen.dart';
+import 'package:chongmu_n/services/reminder_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -230,6 +231,24 @@ void main() {
     expect(normalizeKakaoPayLink('qr.kakaopay.com/Ej7abc123'),
         'https://qr.kakaopay.com/Ej7abc123');
     expect(normalizeKakaoPayLink('https://toss.me/x'), isNull);
+  });
+
+  test('미입금 알림: 시각 계산(월말 넘김), 라벨, ID 고정, 저장/불러오기', () {
+    final at = reminderTimeAfter(DateTime(2026, 11, 29, 23, 50), 3);
+    expect(at, DateTime(2026, 12, 2, 20));
+    expect(reminderLabel(at), '12월 2일 (수) 오후 8시');
+    expect(reminderLabel(DateTime(2026, 12, 6, 0)), '12월 6일 (일) 오전 12시');
+
+    expect(reminderIdFor('abc'), reminderIdFor('abc'));
+    expect(reminderIdFor('abc'), isNot(reminderIdFor('abd')));
+    expect(reminderIdFor('x'), greaterThanOrEqualTo(0));
+
+    final s = Settlement.sample()..remindAt = at;
+    final restored = Settlement.fromJson(s.toJson());
+    expect(restored.remindAt, at);
+    expect(restored.hasPendingReminder(DateTime(2026, 12, 1)), isTrue);
+    expect(restored.hasPendingReminder(DateTime(2026, 12, 3)), isFalse);
+    expect(Settlement.sample().toJson().containsKey('remindAt'), isFalse);
   });
 
   group('결제자 지정 / 송금 정리', () {

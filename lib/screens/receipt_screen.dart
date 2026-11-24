@@ -8,6 +8,7 @@ import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../models/round_item.dart';
+import '../services/reminder_service.dart';
 import '../theme/app_theme.dart';
 import 'settings_screen.dart';
 
@@ -163,6 +164,11 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
     if (nowPaid && allPaid) {
       HapticFeedback.mediumImpact();
       _toast('🎉 모두 입금 완료! 수고했어요, 총무님');
+      // 다 받았으니 예약한 미입금 알림은 취소
+      if (s.remindAt != null) {
+        s.remindAt = null;
+        ReminderService.instance.cancel(s.id);
+      }
     } else {
       HapticFeedback.lightImpact();
     }
@@ -214,6 +220,85 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
     }
     return b.toString().trimRight();
   }
+
+  // ───────────────── 미입금 리마인드 알림 ─────────────────
+
+  Future<void> _pickReminder() async {
+    HapticFeedback.lightImpact();
+    final now = DateTime.now();
+    final days = await showModalBottomSheet<int>(
+      context: context,
+      showDragHandle: true,
+      backgroundColor: context.colors.card,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
+              child: Text(
+                '언제 다시 알려드릴까요?',
+                style: TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w800,
+                  color: context.colors.text,
+                ),
+              ),
+            ),
+            for (final (d, label) in const [
+              (1, '내일'),
+              (3, '3일 후'),
+              (7, '일주일 후')
+            ])
+              ListTile(
+                leading: const Icon(Icons.notifications_active_outlined,
+                    color: AppColors.primary),
+                title: Text(
+                  '$label 저녁 8시',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w700,
+                    color: context.colors.text,
+                  ),
+                ),
+                subtitle: Text(
+                  _reminderLabel(reminderTimeAfter(now, d)),
+                  style: TextStyle(fontSize: 12, color: context.colors.subText),
+                ),
+                onTap: () => Navigator.of(ctx).pop(d),
+              ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (days == null || !mounted) return;
+    final s = widget.settlement;
+    final at = reminderTimeAfter(DateTime.now(), days);
+    final unpaid = _dues.where((d) => !_isPaid(d)).length;
+    final ok = await ReminderService.instance.schedule(s, at, unpaid: unpaid);
+    if (!mounted) return;
+    if (!ok) {
+      _toast('알림을 예약하지 못했어요. 휴대폰 설정에서 알림을 허용해 주세요');
+      return;
+    }
+    setState(() => s.remindAt = at);
+    AppStorage.saveSettlement(s);
+    _toast('${_reminderLabel(at)}에 알려드릴게요 🔔');
+  }
+
+  Future<void> _cancelReminder() async {
+    HapticFeedback.lightImpact();
+    final s = widget.settlement;
+    await ReminderService.instance.cancel(s.id);
+    if (!mounted) return;
+    setState(() => s.remindAt = null);
+    AppStorage.saveSettlement(s);
+    _toast('미입금 알림을 취소했어요');
+  }
+
+  /// '11월 27일 (목) 오후 8시'
+  String _reminderLabel(DateTime at) => reminderLabel(at);
 
   // ───────────────── 개인별 상세 ─────────────────
 
@@ -648,11 +733,59 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
               height: 48,
               child: OutlinedButton.icon(
                 onPressed: _copyReminder,
-                icon: const Icon(Icons.notifications_active_outlined, size: 18),
+                icon: const Icon(Icons.campaign_outlined, size: 18),
                 label: const Text('미입금자 독촉 메시지 복사'),
               ),
             ),
+            const SizedBox(height: 4),
+            _buildReminderRow(),
           ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildReminderRow() {
+    final s = widget.settlement;
+    if (!s.hasPendingReminder(DateTime.now())) {
+      return Center(
+        child: TextButton.icon(
+          onPressed: _pickReminder,
+          style: TextButton.styleFrom(foregroundColor: AppColors.primary),
+          icon: const Icon(Icons.alarm_add_rounded, size: 18),
+          label: const Text(
+            '나중에 미입금 알림 받기',
+            style: TextStyle(fontWeight: FontWeight.w700),
+          ),
+        ),
+      );
+    }
+    return Container(
+      margin: const EdgeInsets.only(top: 4),
+      padding: const EdgeInsets.fromLTRB(12, 4, 4, 4),
+      decoration: BoxDecoration(
+        color: context.colors.primaryLight,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.notifications_active_rounded,
+              size: 18, color: AppColors.primary),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              '${_reminderLabel(s.remindAt!)} 알림 예약됨',
+              style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                color: AppColors.primary,
+              ),
+            ),
+          ),
+          TextButton(
+            onPressed: _cancelReminder,
+            child: Text('취소', style: TextStyle(color: context.colors.subText)),
+          ),
         ],
       ),
     );

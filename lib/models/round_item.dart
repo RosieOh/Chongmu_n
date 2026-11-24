@@ -378,6 +378,7 @@ class Settlement {
     this.roundUnit = 100,
     this.roundMode = RoundMode.up,
     Set<String>? paidIds,
+    this.remindAt,
   })  : id = id ?? newId(),
         createdAt = createdAt ?? DateTime.now(),
         paidIds = paidIds ?? <String>{};
@@ -397,6 +398,13 @@ class Settlement {
 
   /// 입금 확인된 멤버 ID
   final Set<String> paidIds;
+
+  /// 미입금 리마인드 알림 예약 시각 (없으면 null)
+  DateTime? remindAt;
+
+  /// 아직 울리지 않은 알림이 있는지
+  bool hasPendingReminder(DateTime now) =>
+      remindAt != null && remindAt!.isAfter(now);
 
   bool isPaid(String memberId) => paidIds.contains(memberId);
 
@@ -655,6 +663,7 @@ class Settlement {
         'rounds': rounds.map((r) => r.toJson()).toList(),
         'roundUnit': roundUnit,
         'roundMode': roundMode.name,
+        if (remindAt != null) 'remindAt': remindAt!.toIso8601String(),
         'paidIds': paidIds.toList(),
       };
 
@@ -673,6 +682,7 @@ class Settlement {
           .toList(),
       roundUnit: unitOptions.contains(unit) ? unit : 100,
       roundMode: RoundMode.parse(json['roundMode'] as String?),
+      remindAt: DateTime.tryParse((json['remindAt'] as String?) ?? ''),
       paidIds: Set<String>.from((json['paidIds'] as List?) ?? const []),
     );
     s.paidIds.retainWhere((id) => s.members.any((m) => m.id == id));
