@@ -1,5 +1,6 @@
 import 'package:chongmu_n/models/round_item.dart';
 import 'package:chongmu_n/screens/history_screen.dart';
+import 'package:chongmu_n/screens/ledger_screen.dart';
 import 'package:chongmu_n/services/reminder_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -430,5 +431,147 @@ void main() {
       AppStorage.historyById(s.id)!.rounds.first.amount = 1;
       expect(AppStorage.historyById(s.id)!.totalSpent, 50000);
     });
+
+    test('모임 그룹: 저장(같은 이름 덮어쓰기), 삭제, 백업에 포함', () async {
+      await AppStorage.saveGroup(MemberGroup(name: '동기', names: ['나', '민수']));
+      await AppStorage.saveGroup(MemberGroup(name: '팀', names: ['나', '지영']));
+      await AppStorage.saveGroup(
+          MemberGroup(name: '동기', names: ['나', '민수', '현우']));
+      expect(AppStorage.groups.map((g) => g.name), ['동기', '팀']);
+      expect(AppStorage.groups.first.names, ['나', '민수', '현우']);
+
+      final backup = AppStorage.exportBackup(Settlement.blank());
+      await AppStorage.deleteGroup('동기');
+      expect(AppStorage.groups.map((g) => g.name), ['팀']);
+
+      await AppStorage.importBackup(backup);
+      expect(AppStorage.groups.map((g) => g.name).toSet(), {'동기', '팀'});
+
+      expect(
+          MemberGroup.fromJson({
+            'name': '',
+            'names': ['a']
+          }),
+          isNull);
+      expect(MemberGroup.fromJson({'name': 'x', 'names': []}), isNull);
+    });
+
+    test('미수금 장부: 기록에서 입금 처리', () async {
+      final s = Settlement.sample()..isSample = false;
+      await AppStorage.saveSettlement(s);
+      final minsu = s.members[1];
+      expect(buildLedger(AppStorage.loadHistory()).length, 3);
+
+      await AppStorage.setHistoryPaid(s.id, minsu.id, true);
+      expect(AppStorage.historyById(s.id)!.isPaid(minsu.id), isTrue);
+      expect(buildLedger(AppStorage.loadHistory()).map((e) => e.name),
+          isNot(contains('민수')));
+
+      await AppStorage.init(); // 재시작 후에도 유지
+      expect(AppStorage.historyById(s.id)!.isPaid(minsu.id), isTrue);
+    });
+  });
+
+  test('금액 계산식: 사칙연산, 곱셈 먼저, 잘못된 식은 null', () {
+    expect(evalAmount('32,000+15,000'), 47000);
+    expect(evalAmount('120000÷4'), 30000);
+    expect(evalAmount('10000+2×3000'), 16000);
+    expect(evalAmount('50000-12000-8000'), 30000);
+    expect(evalAmount('10000/3'), 3333);
+    expect(evalAmount(' 5 000 '), 5000);
+    expect(evalAmount(''), isNull);
+    expect(evalAmount('1000+'), isNull);
+    expect(evalAmount('+1000'), isNull);
+    expect(evalAmount('1000÷0'), isNull);
+    expect(evalAmount('1000-5000'), isNull);
+    expect(evalAmount('12a'), isNull);
+    expect(isAmountExpr('32,000+15,000'), isTrue);
+    expect(isAmountExpr('32,000'), isFalse);
+  });
+
+  test('할인·쿠폰: 할인율 먼저, 쿠폰 차감, 결제 금액 초과 방지, 저장', () {
+    final s = Settlement.sample();
+    final r = s.rounds.first; // 120,000원 / 4명
+    r.setSale(percent: 10, coupon: 8000); // 120,000 - 12,000 - 8,000
+    expect(r.saleTotal, 20000);
+    expect(r.netAmount, 100000);
+    expect(r.perPerson(100), 25000);
+    expect(s.totalSpent, 164000);
+    expect(s.totalSaved, 20000);
+
+    final restored = RoundItem.fromJson(r.toJson());
+    expect(restored.salePercent, 10);
+    expect(restored.couponAmount, 8000);
+    expect(RoundItem(id: 'x').toJson().containsKey('salePercent'), isFalse);
+
+    r.setSale(percent: 150, coupon: -1);
+    expect(r.salePercent, 100);
+    expect(r.couponAmount, 0);
+    expect(r.netAmount, 0);
+
+    r.setSale(percent: 0, coupon: 999999);
+    expect(r.netAmount, 0);
+    expect(r.extrasOverflow, isFalse);
+    r.setExtra(s.members[1].id, 1000);
+    expect(r.extrasOverflow, isTrue);
+  });
+
+  test('할인 + 다른 사람 결제: 실제 결제 금액 기준으로 송금 정리', () {
+    final s = Settlement.sample();
+    final minsu = s.members[1];
+    s.rounds[1]
+      ..payerId = minsu.id
+      ..setSale(percent: 0, coupon: 4000); // 64,000 → 60,000 / 3명
+    final res = s.buildResults();
+    final collected = Settlement.totalCollected(res);
+    expect(collected - s.totalSpent, inInclusiveRange(0, 400));
+    // 민수가 받을 돈 = 60,000 - 민수 몫
+    final minsuPay = res.firstWhere((p) => p.member.id == minsu.id).pay;
+    final toMinsu = s
+        .buildTransfers(res)
+        .where((t) => t.to.id == minsu.id)
+        .fold(0, (sum, t) => sum + t.amount);
+    expect(toMinsu, 60000 - minsuPay);
+  });
+
+  test('미수금 장부: 사람별 합산, 입금·예시·총무 제외, 많은 순', () {
+    final a = Settlement.sample()..isSample = false;
+    final b = Settlement.sample()..isSample = false;
+    b.members[1].name = ' 민수 ';
+    b.rounds.removeLast(); // 1차만: 1인 30,000원
+    a.togglePaid(a.members[2].id); // 지영 입금
+
+    final ledger = buildLedger([a, b, Settlement.sample()]);
+    final names = ledger.map((e) => e.name).toList();
+    expect(names, isNot(contains('나(총무)')));
+    expect(names.first, '민수'); // 51,400 + 30,000
+    expect(ledger.first.total, 81400);
+    expect(ledger.first.items.length, 2);
+    // 지영은 b 정산 한 건만
+    expect(ledger.firstWhere((e) => e.name == '지영').items.single.settlement,
+        same(b));
+  });
+
+  test('미수금 안내 메시지: 정산별 금액·합계·계좌, 송금 정리 섞이면 계좌 생략', () {
+    final a = Settlement.sample()
+      ..isSample = false
+      ..title = '불금';
+    final b = Settlement.sample()..isSample = false;
+    b.rounds.removeLast();
+    final entry = buildLedger([a, b]).firstWhere((e) => e.name == '민수');
+
+    final text = ledgerReminderText(entry,
+        account: '토스뱅크 1000 (나)', payLinks: ['· 토스 https://toss.me/me']);
+    expect(text, contains('민수님'));
+    expect(text, contains('· 불금 ('));
+    expect(text, contains('· 불금 팀 회식 ('));
+    expect(text, contains('= 합계 81,400원'));
+    expect(text, contains('토스뱅크 1000 (나)'));
+    expect(text, contains('https://toss.me/me'));
+
+    b.rounds.first.payerId = b.members[2].id; // 지영이 결제 → 송금 정리
+    final mixed = buildLedger([a, b]).firstWhere((e) => e.name == '민수');
+    expect(ledgerReminderText(mixed, account: '토스뱅크 1000'),
+        isNot(contains('토스뱅크')));
   });
 }
