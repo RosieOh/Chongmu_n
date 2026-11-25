@@ -418,8 +418,9 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
       final r = s.rounds[i];
       if (r.amount <= 0) continue;
       final payer = _transferMode ? ' · ${s.payerOf(r).name} 결제' : '';
-      b.writeln(
-          '· ${s.roundLabel(i)}  ${Fmt.won(r.amount)} (${r.headCount}명$payer)');
+      final sale = r.hasSale ? ' · 할인 ${Fmt.won(r.saleTotal)}' : '';
+      b.writeln('· ${s.roundLabel(i)}  ${Fmt.won(r.netAmount)} '
+          '(${r.headCount}명$sale$payer)');
     }
     b.writeln('= 총 ${Fmt.won(s.totalSpent)}');
     b.writeln();
@@ -1579,6 +1580,9 @@ class _ReceiptPaper extends StatelessWidget {
     if (r.extras.isNotEmpty) {
       detail.write(' · 개별 추가 ${Fmt.won(r.extrasTotal)}');
     }
+    if (r.hasSale) {
+      detail.write(' · ${Fmt.won(r.amount)}에서 ${Fmt.won(r.saleTotal)} 할인');
+    }
     if (transfers.isNotEmpty) {
       detail.write(' · ${settlement.payerOf(r).name} 결제');
     }
@@ -1587,7 +1591,7 @@ class _ReceiptPaper extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _row(settlement.roundLabel(i), Fmt.won(r.amount), _body),
+          _row(settlement.roundLabel(i), Fmt.won(r.netAmount), _body),
           const SizedBox(height: 2),
           Text(detail.toString(), style: _sub),
         ],
