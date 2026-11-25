@@ -327,7 +327,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       icon: Icons.info_outline_rounded,
                       title: '버전',
                       trailing: Text(
-                        '1.2.0',
+                        '1.3.0',
                         style: TextStyle(color: context.colors.subText),
                       ),
                     ),

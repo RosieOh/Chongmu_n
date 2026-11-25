@@ -78,6 +78,84 @@ String? normalizeKakaoPayLink(String input) {
   return null;
 }
 
+/// 금액 계산식 계산 ('32,000+15,000' → 47000, '120000÷4' → 30000).
+/// + - × ÷ (또는 * /) 를 지원하고, 곱셈·나눗셈을 먼저 계산해요.
+/// 비어 있거나 잘못된 식, 0으로 나누기, 음수 결과는 null.
+int? evalAmount(String expr) {
+  final src = expr
+      .replaceAll(',', '')
+      .replaceAll(' ', '')
+      .replaceAll('×', '*')
+      .replaceAll('x', '*')
+      .replaceAll('÷', '/')
+      .replaceAll('−', '-');
+  if (src.isEmpty) return null;
+  final tokens = RegExp(r'\d+|[+\-*/]').allMatches(src).map((m) => m[0]!);
+  if (tokens.join() != src) return null;
+
+  final list = tokens.toList();
+  // 숫자 / 연산자가 번갈아 와야 해요 (숫자로 시작·끝)
+  if (list.length.isEven) return null;
+  for (var i = 0; i < list.length; i++) {
+    final isNum = int.tryParse(list[i]) != null;
+    if (isNum != i.isEven) return null;
+  }
+
+  // 곱셈·나눗셈 먼저
+  final terms = <double>[double.parse(list[0])];
+  final ops = <String>[];
+  for (var i = 1; i < list.length; i += 2) {
+    final op = list[i];
+    final v = double.parse(list[i + 1]);
+    if (op == '*') {
+      terms.last *= v;
+    } else if (op == '/') {
+      if (v == 0) return null;
+      terms.last /= v;
+    } else {
+      ops.add(op);
+      terms.add(v);
+    }
+  }
+  var total = terms[0];
+  for (var i = 0; i < ops.length; i++) {
+    total = ops[i] == '+' ? total + terms[i + 1] : total - terms[i + 1];
+  }
+  if (total < 0 || total > 999999999999) return null;
+  return total.round();
+}
+
+/// 계산식에 연산자가 들어 있는지 (단순 숫자면 false)
+bool isAmountExpr(String expr) =>
+    RegExp(r'\d\s*[+\-*/×÷−x]\s*\d').hasMatch(expr);
+
+// ─────────────────────────────────────────────
+// 모임 그룹 (자주 모이는 멤버 묶음)
+// ─────────────────────────────────────────────
+
+class MemberGroup {
+  MemberGroup({required this.name, required List<String> names})
+      : names = List.unmodifiable(names);
+
+  final String name;
+
+  /// 멤버 이름 (첫 번째 = 총무)
+  final List<String> names;
+
+  Map<String, dynamic> toJson() => {'name': name, 'names': names};
+
+  static MemberGroup? fromJson(Object? json) {
+    if (json is! Map) return null;
+    final name = (json['name'] as String?)?.trim() ?? '';
+    final names = [
+      for (final n in (json['names'] as List?) ?? const [])
+        if (n is String && n.trim().isNotEmpty) n.trim(),
+    ];
+    if (name.isEmpty || names.isEmpty) return null;
+    return MemberGroup(name: name, names: names);
+  }
+}
+
 // ─────────────────────────────────────────────
 // 모임 멤버
 // ─────────────────────────────────────────────
@@ -123,7 +201,11 @@ class RoundItem {
     this.payerId,
     this.freeMode = false,
     Set<String>? freeIds,
-  })  : freeIds = freeIds ?? <String>{},
+    int salePercent = 0,
+    int couponAmount = 0,
+  })  : salePercent = salePercent.clamp(0, 100),
+        couponAmount = math.max(0, couponAmount),
+        freeIds = freeIds ?? <String>{},
         extras = extras ?? <String, int>{},
         discountPercent = discountOptions.contains(discountPercent)
             ? discountPercent
@@ -137,7 +219,33 @@ class RoundItem {
 
   final String id;
   String name;
+
+  /// 영수증에 찍힌 금액 (할인·쿠폰 적용 전)
   int amount;
+
+  /// 전체 할인율 (%) — 제휴 할인 등. 0이면 없음
+  int salePercent;
+
+  /// 쿠폰·포인트 등 정액 할인 (원). 할인율 적용 뒤에 빼요.
+  int couponAmount;
+
+  bool get hasSale => salePercent > 0 || couponAmount > 0;
+
+  /// 할인·쿠폰으로 빠지는 금액 (결제 금액을 넘지 않음)
+  int get saleTotal {
+    if (amount <= 0) return 0;
+    final v = (amount * salePercent / 100).round() + couponAmount;
+    return math.min(v, amount);
+  }
+
+  /// 실제로 결제한 금액 (할인·쿠폰 적용 후) — 이 금액을 나눠요
+  int get netAmount => amount - saleTotal;
+
+  /// 할인·쿠폰 설정 (잘못된 값은 범위 안으로)
+  void setSale({required int percent, required int coupon}) {
+    salePercent = percent.clamp(0, 100);
+    couponAmount = math.max(0, coupon);
+  }
 
   /// 이 차수에 참석한 멤버 ID
   final Set<String> participantIds;
@@ -182,10 +290,10 @@ class RoundItem {
   int extraOf(String memberId) => isFree(memberId) ? 0 : extras[memberId] ?? 0;
 
   /// 추가금이 결제 금액보다 큰 잘못된 입력인지
-  bool get extrasOverflow => extrasTotal > amount;
+  bool get extrasOverflow => extrasTotal > netAmount;
 
   /// N빵할 공통 금액 (결제 금액 - 개별 추가금)
-  int get sharedAmount => math.max(0, amount - extrasTotal);
+  int get sharedAmount => math.max(0, netAmount - extrasTotal);
 
   /// 추가금 설정 (0 이하면 삭제). 참석자에게만 설정할 수 있어요.
   void setExtra(String memberId, int value) {
@@ -215,7 +323,7 @@ class RoundItem {
 
   /// 특정 멤버가 이 차수에서 내야 할 정확한 금액 (올림 전, 추가금 포함)
   double exactShareFor(String memberId) {
-    if (amount <= 0 || !participantIds.contains(memberId)) return 0;
+    if (netAmount <= 0 || !participantIds.contains(memberId)) return 0;
     final tw = _totalWeight;
     if (tw <= 0) return 0;
     return sharedAmount * weightOf(memberId) / tw + extraOf(memberId);
@@ -224,14 +332,14 @@ class RoundItem {
   /// 카드에 표시할 1인당 금액 (술 마신 사람 기준, 추가금 제외)
   int perPerson(int unit, [RoundMode mode = RoundMode.up]) {
     final tw = _totalWeight;
-    if (amount <= 0 || tw <= 0) return 0;
+    if (netAmount <= 0 || tw <= 0) return 0;
     return roundMoney(sharedAmount / tw, unit, mode);
   }
 
   /// 술 안 마신 사람의 1인당 금액 (추가금 제외)
   int soberPerPerson(int unit, [RoundMode mode = RoundMode.up]) {
     final tw = _totalWeight;
-    if (amount <= 0 || tw <= 0) return 0;
+    if (netAmount <= 0 || tw <= 0) return 0;
     return roundMoney(sharedAmount * soberRate / tw, unit, mode);
   }
 
@@ -266,6 +374,8 @@ class RoundItem {
         if (payerId != null) 'payerId': payerId,
         'freeMode': freeMode,
         'freeIds': freeIds.toList(),
+        if (salePercent > 0) 'salePercent': salePercent,
+        if (couponAmount > 0) 'couponAmount': couponAmount,
       };
 
   factory RoundItem.fromJson(Map<String, dynamic> json) {
@@ -295,6 +405,8 @@ class RoundItem {
       freeMode: (json['freeMode'] as bool?) ?? false,
       freeIds: Set<String>.from((json['freeIds'] as List?) ?? const [])
         ..retainAll(participants),
+      salePercent: (json['salePercent'] as num?)?.toInt() ?? 0,
+      couponAmount: (json['couponAmount'] as num?)?.toInt() ?? 0,
     );
   }
 }
@@ -430,7 +542,11 @@ class Settlement {
       ? '1원 단위 정확히'
       : '${Fmt.number(roundUnit)}원 단위 ${roundMode.label}';
 
-  int get totalSpent => rounds.fold(0, (sum, r) => sum + r.amount);
+  /// 실제 지출 합계 (할인·쿠폰 적용 후)
+  int get totalSpent => rounds.fold(0, (sum, r) => sum + r.netAmount);
+
+  /// 할인·쿠폰으로 아낀 금액 합계
+  int get totalSaved => rounds.fold(0, (sum, r) => sum + r.saleTotal);
 
   /// 한 번이라도 참석한 사람 수
   int get involvedCount {
@@ -486,7 +602,7 @@ class Settlement {
 
   /// 총무 말고 다른 사람이 결제한 차수가 있으면 '송금 정리' 모드
   bool get usesTransfers =>
-      rounds.any((r) => r.amount > 0 && payerOf(r).id != treasurer.id);
+      rounds.any((r) => r.netAmount > 0 && payerOf(r).id != treasurer.id);
 
   /// 누가 누구에게 얼마 보내면 되는지 (송금 횟수가 적도록 큰 금액부터 짝지음).
   /// 올림으로 생긴 자투리는 총무가 받아요.
@@ -497,9 +613,9 @@ class Settlement {
       net[p.member.id] = net[p.member.id]! + p.pay;
     }
     for (final r in rounds) {
-      if (r.amount <= 0) continue;
+      if (r.netAmount <= 0) continue;
       final id = payerOf(r).id;
-      net[id] = net[id]! - r.amount;
+      net[id] = net[id]! - r.netAmount;
     }
     // 자투리(걷는 돈 - 실제 지출)는 총무 몫
     final rest = net.values.fold(0, (a, b) => a + b);
@@ -571,7 +687,7 @@ class Settlement {
       final shares = <String, double>{};
       var total = 0.0;
       for (final r in rounds) {
-        if (r.amount <= 0 || !r.participantIds.contains(m.id)) continue;
+        if (r.netAmount <= 0 || !r.participantIds.contains(m.id)) continue;
         final v = r.exactShareFor(m.id);
         shares[r.id] = v;
         total += v;
@@ -693,6 +809,61 @@ class Settlement {
 }
 
 // ─────────────────────────────────────────────
+// 미수금 장부 (지난 정산 전체에서 아직 안 낸 돈 모아 보기)
+// ─────────────────────────────────────────────
+
+/// 한 정산에서 아직 안 낸 돈
+class LedgerItem {
+  const LedgerItem({
+    required this.settlement,
+    required this.member,
+    required this.amount,
+  });
+
+  final Settlement settlement;
+  final Member member;
+  final int amount;
+}
+
+/// 한 사람(이름 기준)의 미수금 모음
+class LedgerEntry {
+  LedgerEntry(this.name);
+
+  final String name;
+  final List<LedgerItem> items = [];
+
+  int get total => items.fold(0, (sum, e) => sum + e.amount);
+}
+
+/// 사람별 미수금 (많은 순). 총무가 직접 결제한 정산에서는 총무 본인은 빼요.
+List<LedgerEntry> buildLedger(Iterable<Settlement> settlements) {
+  final byName = <String, LedgerEntry>{};
+  for (final s in settlements) {
+    if (s.isSample || s.totalSpent <= 0) continue;
+    final transfers = s.usesTransfers;
+    for (final d in s.buildDues()) {
+      if (s.isPaid(d.member.id) || d.amount <= 0) continue;
+      if (!transfers && d.member.id == s.treasurer.id) continue;
+      final raw = d.member.name.trim();
+      final name = raw.isEmpty ? '이름 없음' : raw;
+      byName
+          .putIfAbsent(name, () => LedgerEntry(name))
+          .items
+          .add(LedgerItem(settlement: s, member: d.member, amount: d.amount));
+    }
+  }
+  for (final e in byName.values) {
+    e.items.sort(
+        (a, b) => b.settlement.createdAt.compareTo(a.settlement.createdAt));
+  }
+  return byName.values.toList()
+    ..sort((a, b) {
+      final c = b.total.compareTo(a.total);
+      return c != 0 ? c : a.name.compareTo(b.name);
+    });
+}
+
+// ─────────────────────────────────────────────
 // 로컬 저장소 (shared_preferences) — 서버/로그인 없음
 // ─────────────────────────────────────────────
 
@@ -712,6 +883,10 @@ class AppStorage {
   static const _kMemberAccounts = 'member_accounts_v1';
   static const _kTossLink = 'pay_link_toss';
   static const _kKakaoPayLink = 'pay_link_kakaopay';
+  static const _kGroups = 'member_groups_v1';
+
+  /// 모임 그룹은 20개까지
+  static const int groupLimit = 20;
 
   /// 기록은 최근 100건까지만 보관 (기기 저장 공간 보호)
   static const int historyLimit = 100;
@@ -790,6 +965,21 @@ class AppStorage {
     return _writeHistory();
   }
 
+  /// 지난 정산의 입금 확인 상태 바꾸기 (미수금 장부에서 사용)
+  static Future<void> setHistoryPaid(
+      String settlementId, String memberId, bool paid) {
+    for (final s in _history) {
+      if (s.id != settlementId) continue;
+      if (paid) {
+        s.paidIds.add(memberId);
+      } else {
+        s.paidIds.remove(memberId);
+      }
+      return _writeHistory();
+    }
+    return Future.value();
+  }
+
   /// 삭제 되돌리기
   static Future<void> restoreHistory(Settlement s) {
     _history
@@ -847,6 +1037,7 @@ class AppStorage {
         'exportedAt': DateTime.now().toIso8601String(),
         'current': current.toJson(),
         'history': _history.map((e) => e.toJson()).toList(),
+        'groups': groups.map((g) => g.toJson()).toList(),
         'account': {
           'bank': bankName,
           'holder': accountHolder,
@@ -914,9 +1105,48 @@ class AppStorage {
         writes.add(setKakaoPayLink(kakao));
       }
     }
+    final rawGroups = data['groups'];
+    if (rawGroups is List) {
+      final list = groups;
+      for (final g
+          in rawGroups.map(MemberGroup.fromJson).whereType<MemberGroup>()) {
+        if (!list.any((e) => e.name == g.name)) list.add(g);
+      }
+      writes.add(_writeGroups(list));
+    }
     await Future.wait(writes);
     return incoming.length;
   }
+
+  // ── 모임 그룹 ──
+
+  static List<MemberGroup> get groups {
+    final raw = _prefs.getString(_kGroups);
+    if (raw == null) return [];
+    try {
+      return (jsonDecode(raw) as List)
+          .map(MemberGroup.fromJson)
+          .whereType<MemberGroup>()
+          .toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  static Future<void> _writeGroups(List<MemberGroup> list) => _prefs.setString(
+        _kGroups,
+        jsonEncode(list.take(groupLimit).map((g) => g.toJson()).toList()),
+      );
+
+  /// 그룹 저장 (같은 이름이 있으면 덮어쓰고 맨 앞으로)
+  static Future<void> saveGroup(MemberGroup group) {
+    final list = groups..removeWhere((g) => g.name == group.name);
+    list.insert(0, group);
+    return _writeGroups(list);
+  }
+
+  static Future<void> deleteGroup(String name) =>
+      _writeGroups(groups..removeWhere((g) => g.name == name));
 
   // ── 멤버별 계좌 (이름 기준으로 기억해서 다음 정산에 자동으로 채움) ──
 

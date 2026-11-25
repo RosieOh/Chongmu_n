@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 
 import '../models/round_item.dart';
 import '../theme/app_theme.dart';
+import 'ledger_screen.dart';
 
 /// 지난 정산 화면에서 고른 결과
 class HistoryPick {
@@ -186,10 +187,41 @@ class _HistoryScreenState extends State<HistoryScreen> {
     );
   }
 
+  Future<void> _openLedger() async {
+    HapticFeedback.lightImpact();
+    final pick = await Navigator.of(context).push<HistoryPick>(
+      MaterialPageRoute(
+        builder: (_) => LedgerScreen(currentId: widget.currentId),
+      ),
+    );
+    if (!mounted) return;
+    if (pick != null) {
+      Navigator.of(context).pop(pick);
+      return;
+    }
+    // 장부에서 입금 확인한 내용 반영
+    setState(() {
+      _items
+        ..clear()
+        ..addAll(AppStorage.loadHistory());
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('지난 정산')),
+      appBar: AppBar(
+        title: const Text('지난 정산'),
+        actions: [
+          if (_items.isNotEmpty)
+            IconButton(
+              tooltip: '미수금 장부',
+              onPressed: _openLedger,
+              icon: Icon(Icons.account_balance_wallet_outlined,
+                  color: context.colors.text),
+            ),
+        ],
+      ),
       body: _items.isEmpty ? const _EmptyHistory() : _buildList(),
     );
   }
@@ -255,6 +287,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
       children: [
         _StatsCard(items: _items),
         const SizedBox(height: 12),
+        _LedgerBanner(ledger: buildLedger(_items), onTap: _openLedger),
         TextField(
           controller: _searchCtrl,
           textInputAction: TextInputAction.search,
@@ -717,6 +750,66 @@ class _SheetTile extends StatelessWidget {
               subtitle!,
               style: TextStyle(fontSize: 12, color: context.colors.subText),
             ),
+    );
+  }
+}
+
+/// 아직 받지 못한 돈 요약 (누르면 미수금 장부)
+class _LedgerBanner extends StatelessWidget {
+  const _LedgerBanner({required this.ledger, required this.onTap});
+
+  final List<LedgerEntry> ledger;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    if (ledger.isEmpty) return const SizedBox.shrink();
+    final total = ledger.fold<int>(0, (sum, e) => sum + e.total);
+    final names = ledger.take(3).map((e) => e.name).join(', ');
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Material(
+        color: context.colors.primaryLight,
+        borderRadius: BorderRadius.circular(AppDecor.radius),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(AppDecor.radius),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
+            child: Row(
+              children: [
+                const Icon(Icons.account_balance_wallet_outlined,
+                    size: 20, color: AppColors.primary),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '받을 돈 ${Fmt.won(total)} · ${ledger.length}명',
+                        style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w800,
+                          color: AppColors.primary,
+                        ),
+                      ),
+                      Text(
+                        ledger.length > 3 ? '$names 외' : names,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                            fontSize: 12, color: context.colors.subText),
+                      ),
+                    ],
+                  ),
+                ),
+                const Icon(Icons.chevron_right_rounded,
+                    color: AppColors.primary),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

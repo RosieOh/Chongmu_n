@@ -1,6 +1,7 @@
 import 'package:chongmu_n/models/round_item.dart';
 import 'package:chongmu_n/screens/history_screen.dart';
 import 'package:chongmu_n/screens/home_screen.dart';
+import 'package:chongmu_n/screens/ledger_screen.dart';
 import 'package:chongmu_n/screens/receipt_screen.dart';
 import 'package:chongmu_n/screens/settings_screen.dart';
 import 'package:chongmu_n/theme/app_theme.dart';
@@ -86,6 +87,73 @@ void main() {
         expect(find.text('개인 메시지 복사'), findsOneWidget);
       });
 
+      testWidgets('메인 화면 (계산기 · 할인·쿠폰)', (tester) async {
+        final s = Settlement.sample()..isSample = false;
+        s.rounds.first.setSale(percent: 10, coupon: 8000);
+        await AppStorage.saveSettlement(s);
+        await pumpScreen(tester, const HomeScreen(), mode);
+        expect(
+            find.text('10% 할인 + 쿠폰 8,000원 → 실제 결제 100,000원'), findsOneWidget);
+        expect(find.text('164,000원'), findsOneWidget); // 할인 후 총액
+
+        await tester.tap(find.text('계산기').first);
+        await tester.pumpAndSettle();
+        expect(find.text('금액 계산기'), findsOneWidget);
+        for (final k in [
+          'C',
+          '3',
+          '2',
+          '0',
+          '0',
+          '0',
+          '+',
+          '1',
+          '5',
+          '00',
+          '0'
+        ]) {
+          await tester.tap(find.text(k).last);
+          await tester.pump();
+        }
+        expect(find.text('= 47,000원'), findsOneWidget);
+        await tester.tap(find.text('47,000원 입력'));
+        await tester.pumpAndSettle();
+        expect(find.text('47,000'), findsOneWidget);
+      });
+
+      testWidgets('메인 화면 (모임 그룹 불러오기)', (tester) async {
+        await AppStorage.saveGroup(
+            MemberGroup(name: '대학 동기', names: ['나', '철수', '영희']));
+        await pumpScreen(tester, const HomeScreen(), mode);
+        await tester.tap(find.text('모임 그룹'));
+        await tester.pumpAndSettle();
+        expect(find.text('지금 멤버 4명을 그룹으로 저장'), findsOneWidget);
+        expect(find.text('대학 동기 · 3명'), findsOneWidget);
+
+        await tester.tap(find.text('대학 동기 · 3명'));
+        await tester.pumpAndSettle();
+        expect(find.text('철수'), findsWidgets);
+        expect(find.text('영희'), findsWidgets);
+        expect(find.text('민수'), findsNothing); // 예시 멤버는 빠짐
+      });
+
+      testWidgets('미수금 장부 (사람별 · 입금 확인 · 빈 화면)', (tester) async {
+        await pumpScreen(tester, const LedgerScreen(currentId: 'none'), mode);
+        expect(find.text('받을 돈이 없어요'), findsOneWidget);
+
+        final s = Settlement.sample()..isSample = false;
+        await AppStorage.saveSettlement(s);
+        await pumpScreen(tester, const LedgerScreen(currentId: 'none'), mode);
+        expect(find.text('아직 받지 못한 돈'), findsOneWidget);
+        expect(find.text('3명 · 3건'), findsOneWidget);
+        expect(find.text('안내 메시지 복사'), findsNWidgets(3));
+
+        await tester.tap(find.byTooltip('민수 입금 확인'));
+        await tester.pumpAndSettle();
+        expect(find.text('2명 · 2건'), findsOneWidget);
+        expect(AppStorage.historyById(s.id)!.isPaid(s.members[1].id), isTrue);
+      });
+
       testWidgets('설정 화면 (화면 모드 선택)', (tester) async {
         await pumpScreen(tester, const SettingsScreen(), mode);
         expect(find.text('화면 모드'), findsOneWidget);
@@ -102,6 +170,7 @@ void main() {
         await pumpScreen(tester, HistoryScreen(currentId: s.id), mode);
         expect(find.text('주말 등산'), findsOneWidget);
         expect(find.text('정산 횟수'), findsOneWidget);
+        expect(find.textContaining('받을 돈 '), findsOneWidget);
 
         await tester.enterText(find.byType(TextField), '없는모임');
         await tester.pumpAndSettle();

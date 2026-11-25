@@ -259,6 +259,84 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  // ───────────────── 모임 그룹 ─────────────────
+
+  Future<void> _openGroups() async {
+    HapticFeedback.lightImpact();
+    FocusScope.of(context).unfocus();
+    final action = await showModalBottomSheet<_GroupAction>(
+      context: context,
+      backgroundColor: context.colors.card,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (_) => _GroupSheet(
+        groups: AppStorage.groups,
+        memberCount: _s.members.length,
+      ),
+    );
+    if (action == null || !mounted) return;
+    switch (action) {
+      case _GroupSave():
+        await _saveGroup();
+      case _GroupLoad(:final group):
+        _loadGroup(group);
+      case _GroupDelete(:final group):
+        await AppStorage.deleteGroup(group.name);
+        if (!mounted) return;
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(SnackBar(
+            content: Text('"${group.name}" 그룹을 삭제했어요'),
+            duration: const Duration(seconds: 3),
+            action: SnackBarAction(
+              label: '되돌리기',
+              onPressed: () => AppStorage.saveGroup(group),
+            ),
+          ));
+    }
+  }
+
+  Future<void> _saveGroup() async {
+    final names = [
+      for (final m in _s.members)
+        if (m.name.trim().isNotEmpty) m.name.trim(),
+    ];
+    if (names.isEmpty) return;
+    final res = await showDialog<_NameResult>(
+      context: context,
+      builder: (_) => _NameDialog(
+        title: '그룹 이름',
+        initial: _s.title.trim().characters.take(10).toString(),
+        hint: '예: 대학 동기',
+      ),
+    );
+    if (res == null || res.delete || !mounted) return;
+    final exists = AppStorage.groups.any((g) => g.name == res.name);
+    await AppStorage.saveGroup(MemberGroup(name: res.name, names: names));
+    if (!mounted) return;
+    _toast(exists
+        ? '"${res.name}" 그룹을 지금 멤버로 바꿨어요'
+        : '"${res.name}" 그룹을 저장했어요 (${names.length}명)');
+  }
+
+  /// 그룹 멤버로 새 정산 시작 (지금 정산은 '지난 정산'에 남아요)
+  void _loadGroup(MemberGroup g) {
+    final members = [
+      for (final n in g.names)
+        Member(id: newId(), name: n, account: AppStorage.accountForName(n)),
+    ];
+    final keepCurrent = _s.totalSpent > 0;
+    _replaceSettlement(Settlement.fresh(
+      members: members,
+      roundUnit: _s.roundUnit,
+      roundMode: _s.roundMode,
+      title: keepCurrent ? '' : _s.title,
+    ));
+    _toast(keepCurrent
+        ? '"${g.name}" 멤버로 새 정산을 시작했어요. 이전 정산은 지난 정산에 있어요'
+        : '"${g.name}" 멤버 ${members.length}명을 불러왔어요');
+  }
+
   // ───────────────── 화면 이동 ─────────────────
 
   Future<void> _openReceipt() async {
@@ -487,9 +565,21 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
               const Spacer(),
-              Text('탭하면 이름 수정', style: _Txt.caption(context)),
+              TextButton.icon(
+                onPressed: _openGroups,
+                style: TextButton.styleFrom(
+                  foregroundColor: AppColors.primary,
+                  visualDensity: VisualDensity.compact,
+                ),
+                icon: const Icon(Icons.groups_rounded, size: 18),
+                label: const Text(
+                  '모임 그룹',
+                  style: TextStyle(fontWeight: FontWeight.w800),
+                ),
+              ),
             ],
           ),
+          Text('이름을 누르면 수정할 수 있어요', style: _Txt.caption(context)),
           const SizedBox(height: 12),
           Wrap(
             spacing: 8,
@@ -658,6 +748,11 @@ class _HomeScreenState extends State<HomeScreen> {
                   label: '+${a ~/ 10000}만',
                   onTap: () => _addAmount(r, a),
                 ),
+              _QuickChip(
+                label: '계산기',
+                icon: Icons.calculate_outlined,
+                onTap: () => _openCalc(r),
+              ),
               if (r.amount > 0)
                 _QuickChip(
                   label: '지우기',
@@ -809,6 +904,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 _buildFree(r, attendees),
                 const SizedBox(height: 6),
                 _buildExtras(r, attendees),
+                const SizedBox(height: 6),
+                _buildSale(r),
               ],
             ),
           ),
@@ -1073,6 +1170,85 @@ class _HomeScreenState extends State<HomeScreen> {
     );
     if (res == null || !mounted) return;
     _update(() => r.setExtra(res.memberId, res.amount));
+  }
+
+  /// 금액 계산기 (영수증 여러 장 더하기, 나누기 등)
+  Future<void> _openCalc(RoundItem r) async {
+    HapticFeedback.lightImpact();
+    FocusScope.of(context).unfocus();
+    final v = await showModalBottomSheet<int>(
+      context: context,
+      backgroundColor: context.colors.card,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (_) => _CalcSheet(initial: r.amount),
+    );
+    if (v == null || !mounted) return;
+    _update(() => r.amount = v);
+    _amountCtrl(r).text = v > 0 ? Fmt.number(v) : '';
+  }
+
+  /// 할인·쿠폰 (결제 금액에서 먼저 빼고 나눠요)
+  Widget _buildSale(RoundItem r) {
+    final parts = <String>[
+      if (r.salePercent > 0) '${r.salePercent}% 할인',
+      if (r.couponAmount > 0) '쿠폰 ${Fmt.won(r.couponAmount)}',
+    ];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(Icons.local_offer_outlined,
+                size: 18, color: context.colors.subText),
+            const SizedBox(width: 6),
+            const Expanded(child: Text('할인·쿠폰', style: _Txt.label)),
+            TextButton.icon(
+              onPressed: () => _editSale(r),
+              style: TextButton.styleFrom(
+                foregroundColor: AppColors.primary,
+                visualDensity: VisualDensity.compact,
+              ),
+              icon: Icon(r.hasSale ? Icons.edit_rounded : Icons.add_rounded,
+                  size: 18),
+              label: Text(
+                r.hasSale ? '수정' : '추가',
+                style: const TextStyle(fontWeight: FontWeight.w800),
+              ),
+            ),
+          ],
+        ),
+        Text(
+          !r.hasSale
+              ? '제휴 할인이나 쿠폰을 먼저 빼고 나눌 수 있어요'
+              : r.amount <= 0
+                  ? '${parts.join(' + ')} · 결제 금액을 입력해 주세요'
+                  : '${parts.join(' + ')} → 실제 결제 ${Fmt.won(r.netAmount)}',
+          style: r.hasSale
+              ? const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.primary,
+                )
+              : _Txt.caption(context),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _editSale(RoundItem r) async {
+    HapticFeedback.lightImpact();
+    FocusScope.of(context).unfocus();
+    final res = await showDialog<(int, int)>(
+      context: context,
+      builder: (_) => _SaleDialog(
+        amount: r.amount,
+        percent: r.salePercent,
+        coupon: r.couponAmount,
+      ),
+    );
+    if (res == null || !mounted) return;
+    _update(() => r.setSale(percent: res.$1, coupon: res.$2));
   }
 
   Widget _buildRoundingCard() {
@@ -1552,12 +1728,17 @@ class _SelectChip extends StatelessWidget {
 
 /// +1만, +3만 같은 원터치 금액 칩
 class _QuickChip extends StatelessWidget {
-  const _QuickChip(
-      {required this.label, required this.onTap, this.muted = false});
+  const _QuickChip({
+    required this.label,
+    required this.onTap,
+    this.muted = false,
+    this.icon,
+  });
 
   final String label;
   final VoidCallback onTap;
   final bool muted;
+  final IconData? icon;
 
   @override
   Widget build(BuildContext context) {
@@ -1575,13 +1756,22 @@ class _QuickChip extends StatelessWidget {
           onTap: onTap,
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-            child: Text(
-              label,
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w700,
-                color: muted ? context.colors.subText : context.colors.text,
-              ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (icon != null) ...[
+                  Icon(icon, size: 16, color: AppColors.primary),
+                  const SizedBox(width: 4),
+                ],
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: muted ? context.colors.subText : context.colors.text,
+                  ),
+                ),
+              ],
             ),
           ),
         ),
@@ -1945,9 +2135,11 @@ class _NameDialog extends StatefulWidget {
     required this.initial,
     this.showDelete = false,
     this.suggestions = const [],
+    this.hint = '이름 입력',
   });
 
   final String title;
+  final String hint;
   final String initial;
   final bool showDelete;
 
@@ -1997,8 +2189,8 @@ class _NameDialogState extends State<_NameDialog> {
               maxLength: 10,
               textInputAction: TextInputAction.done,
               onSubmitted: (_) => _submit(),
-              decoration:
-                  AppDecor.boxInput(context, '이름 입력').copyWith(counterText: ''),
+              decoration: AppDecor.boxInput(context, widget.hint)
+                  .copyWith(counterText: ''),
             ),
             if (widget.suggestions.isNotEmpty) ...[
               const SizedBox(height: 14),
@@ -2160,6 +2352,441 @@ class _ExtraDialogState extends State<_ExtraDialog> {
           ),
         ),
       ],
+    );
+  }
+}
+
+// ── 금액 계산기 ──
+
+class _CalcSheet extends StatefulWidget {
+  const _CalcSheet({required this.initial});
+
+  final int initial;
+
+  @override
+  State<_CalcSheet> createState() => _CalcSheetState();
+}
+
+class _CalcSheetState extends State<_CalcSheet> {
+  static const _ops = ['+', '-', '×', '÷'];
+
+  late String _expr = widget.initial > 0 ? '${widget.initial}' : '';
+
+  bool get _endsWithOp =>
+      _expr.isNotEmpty && _ops.contains(_expr[_expr.length - 1]);
+
+  /// 끝에 연산자가 있으면 빼고 계산 (입력 중에도 결과 미리 보기)
+  int? get _result =>
+      evalAmount(_endsWithOp ? _expr.substring(0, _expr.length - 1) : _expr);
+
+  /// '32000+15000' → '32,000 + 15,000'
+  String get _display {
+    if (_expr.isEmpty) return '0';
+    return _expr.replaceAllMapped(RegExp(r'\d+|[+\-×÷]'), (m) {
+      final t = m[0]!;
+      final n = int.tryParse(t);
+      if (n != null) return Fmt.number(n);
+      return ' ${t == '-' ? '−' : t} ';
+    });
+  }
+
+  void _press(String key) {
+    HapticFeedback.selectionClick();
+    setState(() {
+      if (key == 'C') {
+        _expr = '';
+      } else if (key == '⌫') {
+        if (_expr.isNotEmpty) _expr = _expr.substring(0, _expr.length - 1);
+      } else if (_ops.contains(key)) {
+        if (_expr.isEmpty) return;
+        if (_endsWithOp) _expr = _expr.substring(0, _expr.length - 1);
+        _expr += key;
+      } else {
+        // 숫자: 한 덩어리 최대 12자리
+        final last = RegExp(r'\d*$').firstMatch(_expr)![0]!;
+        if (last.length + key.length > 12) return;
+        if (last == '0') {
+          if (key.startsWith('0')) return; // '00' 같은 입력 막기
+          _expr = _expr.substring(0, _expr.length - 1);
+        }
+        if (last.isEmpty && key == '00') key = '0';
+        _expr += key;
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final result = _result;
+    final hasOp = isAmountExpr(_expr);
+    Widget key(String label, {bool op = false, VoidCallback? onTap}) {
+      return Expanded(
+        child: Padding(
+          padding: const EdgeInsets.all(4),
+          child: Material(
+            color: op ? context.colors.primaryLight : context.colors.background,
+            borderRadius: BorderRadius.circular(12),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(12),
+              onTap: onTap ?? () => _press(label),
+              child: SizedBox(
+                height: 52,
+                child: Center(
+                  child: label == '⌫'
+                      ? Icon(Icons.backspace_outlined,
+                          size: 20, color: context.colors.text)
+                      : Text(
+                          label == '-' ? '−' : label,
+                          style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w700,
+                            color: op ? AppColors.primary : context.colors.text,
+                          ),
+                        ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Text('금액 계산기', style: _Txt.cardTitle),
+            const SizedBox(height: 2),
+            Text('영수증 여러 장을 더하거나 나눌 때 써 보세요', style: _Txt.caption(context)),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+              decoration: BoxDecoration(
+                color: context.colors.background,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    _display,
+                    textAlign: TextAlign.right,
+                    style: TextStyle(
+                      fontSize: hasOp ? 16 : 26,
+                      fontWeight: hasOp ? FontWeight.w600 : FontWeight.w800,
+                      color:
+                          hasOp ? context.colors.subText : context.colors.text,
+                    ),
+                  ),
+                  if (hasOp) ...[
+                    const SizedBox(height: 4),
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        result == null ? '계산할 수 없어요' : '= ${Fmt.won(result)}',
+                        style: TextStyle(
+                          fontSize: 26,
+                          fontWeight: FontWeight.w900,
+                          color: result == null
+                              ? AppColors.danger
+                              : AppColors.primary,
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+            for (final row in const [
+              ['7', '8', '9', '÷'],
+              ['4', '5', '6', '×'],
+              ['1', '2', '3', '-'],
+              ['00', '0', '⌫', '+'],
+            ])
+              Row(
+                children: [
+                  for (final k in row) key(k, op: _ops.contains(k)),
+                ],
+              ),
+            Row(
+              children: [
+                key('C'),
+                Expanded(
+                  flex: 3,
+                  child: Padding(
+                    padding: const EdgeInsets.all(4),
+                    child: SizedBox(
+                      height: 52,
+                      child: FilledButton(
+                        onPressed: result == null
+                            ? null
+                            : () => Navigator.of(context).pop(result),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: AppColors.primary,
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12)),
+                        ),
+                        child: Text(
+                          result == null ? '금액 입력' : '${Fmt.won(result)} 입력',
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w800,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── 할인·쿠폰 다이얼로그 ──
+
+class _SaleDialog extends StatefulWidget {
+  const _SaleDialog({
+    required this.amount,
+    required this.percent,
+    required this.coupon,
+  });
+
+  final int amount;
+  final int percent;
+  final int coupon;
+
+  @override
+  State<_SaleDialog> createState() => _SaleDialogState();
+}
+
+class _SaleDialogState extends State<_SaleDialog> {
+  static const _presets = [5, 10, 15, 20, 30];
+
+  late int _percent = widget.percent;
+  late final TextEditingController _couponCtrl = TextEditingController(
+    text: widget.coupon > 0 ? Fmt.number(widget.coupon) : '',
+  );
+
+  int get _coupon => int.tryParse(_couponCtrl.text.replaceAll(',', '')) ?? 0;
+
+  @override
+  void dispose() {
+    _couponCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final preview = RoundItem(id: '', amount: widget.amount)
+      ..setSale(percent: _percent, coupon: _coupon);
+    return AlertDialog(
+      backgroundColor: context.colors.card,
+      surfaceTintColor: Colors.transparent,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+      title: const Text(
+        '할인·쿠폰',
+        style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+      ),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('전체 할인율', style: _Txt.caption(context)),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: [
+                _SelectChip(
+                  label: '없음',
+                  dense: true,
+                  selected: _percent == 0,
+                  onTap: () => setState(() => _percent = 0),
+                ),
+                for (final p in _presets)
+                  _SelectChip(
+                    label: '$p%',
+                    dense: true,
+                    selected: _percent == p,
+                    onTap: () => setState(() => _percent = p),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Text('쿠폰·포인트 (할인율 적용 뒤에 빼요)', style: _Txt.caption(context)),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _couponCtrl,
+              keyboardType: TextInputType.number,
+              inputFormatters: [ThousandsFormatter()],
+              textInputAction: TextInputAction.done,
+              onChanged: (_) => setState(() {}),
+              decoration: AppDecor.boxInput(context, '금액 (예: 5,000)')
+                  .copyWith(suffixText: '원'),
+            ),
+            if (widget.amount > 0 && preview.hasSale) ...[
+              const SizedBox(height: 12),
+              Text(
+                '${Fmt.won(widget.amount)} - ${Fmt.won(preview.saleTotal)}'
+                ' = ${Fmt.won(preview.netAmount)}',
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.primary,
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+      actions: [
+        if (widget.percent > 0 || widget.coupon > 0)
+          TextButton(
+            onPressed: () => Navigator.of(context).pop((0, 0)),
+            child: const Text('삭제', style: TextStyle(color: AppColors.danger)),
+          ),
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: Text('취소', style: TextStyle(color: context.colors.subText)),
+        ),
+        TextButton(
+          onPressed: () => Navigator.of(context).pop((_percent, _coupon)),
+          child: const Text(
+            '저장',
+            style: TextStyle(
+                color: AppColors.primary, fontWeight: FontWeight.w800),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ── 모임 그룹 시트 ──
+
+sealed class _GroupAction {
+  const _GroupAction();
+}
+
+class _GroupSave extends _GroupAction {
+  const _GroupSave();
+}
+
+class _GroupLoad extends _GroupAction {
+  const _GroupLoad(this.group);
+
+  final MemberGroup group;
+}
+
+class _GroupDelete extends _GroupAction {
+  const _GroupDelete(this.group);
+
+  final MemberGroup group;
+}
+
+class _GroupSheet extends StatelessWidget {
+  const _GroupSheet({required this.groups, required this.memberCount});
+
+  final List<MemberGroup> groups;
+  final int memberCount;
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.sizeOf(context).height * 0.7,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 4),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('모임 그룹', style: _Txt.cardTitle),
+                  const SizedBox(height: 2),
+                  Text('자주 모이는 멤버를 저장해 두고 한 번에 불러와요',
+                      style: _Txt.caption(context)),
+                ],
+              ),
+            ),
+            ListTile(
+              contentPadding: const EdgeInsets.symmetric(horizontal: 20),
+              leading:
+                  const Icon(Icons.group_add_rounded, color: AppColors.primary),
+              title: Text(
+                '지금 멤버 $memberCount명을 그룹으로 저장',
+                style: const TextStyle(
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.primary,
+                ),
+              ),
+              onTap: () => Navigator.of(context).pop(const _GroupSave()),
+            ),
+            const Divider(height: 1),
+            if (groups.isEmpty)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 24, 20, 24),
+                child: Text(
+                  '저장된 그룹이 없어요',
+                  textAlign: TextAlign.center,
+                  style: _Txt.caption(context),
+                ),
+              )
+            else
+              Flexible(
+                child: ListView(
+                  shrinkWrap: true,
+                  children: [
+                    for (final g in groups)
+                      ListTile(
+                        contentPadding:
+                            const EdgeInsets.only(left: 20, right: 8),
+                        leading: Icon(Icons.groups_rounded,
+                            color: context.colors.subText),
+                        title: Text(
+                          '${g.name} · ${g.names.length}명',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontWeight: FontWeight.w700,
+                            color: context.colors.text,
+                          ),
+                        ),
+                        subtitle: Text(
+                          g.names.join(', '),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: _Txt.caption(context),
+                        ),
+                        onTap: () => Navigator.of(context).pop(_GroupLoad(g)),
+                        trailing: IconButton(
+                          tooltip: '${g.name} 삭제',
+                          icon: Icon(Icons.delete_outline_rounded,
+                              color: context.colors.subText),
+                          onPressed: () =>
+                              Navigator.of(context).pop(_GroupDelete(g)),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+          ],
+        ),
+      ),
     );
   }
 }
