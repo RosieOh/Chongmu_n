@@ -574,4 +574,156 @@ void main() {
     expect(ledgerReminderText(mixed, account: '토스뱅크 1000'),
         isNot(contains('토스뱅크')));
   });
+
+  // ───────── v1.4: 술값 따로 · 비율 · 찬조 · 적립금 ─────────
+
+  Settlement four(int amount) {
+    final ms = [
+      for (final n in ['나', 'A', 'B', 'C']) Member(id: n, name: n),
+    ];
+    return Settlement(
+      members: ms,
+      rounds: [
+        RoundItem(
+            id: 'r1', amount: amount, participantIds: {'나', 'A', 'B', 'C'}),
+      ],
+    );
+  }
+
+  test('술값 따로: 술값은 마신 사람끼리, 나머지는 모두가', () {
+    final s = four(100000);
+    final r = s.rounds.first
+      ..soberDiscount = true
+      ..soberMode = SoberMode.split
+      ..alcoholAmount = 40000
+      ..soberIds.add('C');
+    // 음식 60,000/4 = 15,000 · 술 40,000/3 = 13,333.3
+    expect(r.exactShareFor('C'), closeTo(15000, 0.01));
+    expect(r.exactShareFor('A'), closeTo(28333.33, 0.01));
+    expect(r.perPerson(100), 28400);
+    expect(r.soberPerPerson(100), 15000);
+    final pays = {for (final p in s.buildResults()) p.member.id: p.pay};
+    expect(pays['C'], 15000);
+    expect(pays['A'], 28400);
+
+    // 술값이 공통 금액보다 크면 경고 + 공통 금액까지만
+    r.alcoholAmount = 150000;
+    expect(r.alcoholOverflow, isTrue);
+    expect(r.alcoholPart, 100000);
+
+    // 모두 안 마셨으면 술값을 따로 나누지 않음
+    r
+      ..alcoholAmount = 40000
+      ..soberIds.addAll(['나', 'A', 'B']);
+    expect(r.alcoholPart, 0);
+    expect(r.exactShareFor('A'), closeTo(25000, 0.01));
+  });
+
+  test('사람별 비율: 0.5배는 절반만, 할인율 모드와 함께 곱해짐', () {
+    final s = four(90000);
+    final r = s.rounds.first..removeParticipant('C');
+    r.setWeight('A', 0.5); // 총 비율 2.5 → 1배 36,000
+    expect(r.exactShareFor('A'), closeTo(18000, 0.01));
+    expect(r.exactShareFor('B'), closeTo(36000, 0.01));
+    r.setWeight('A', 1.0);
+    expect(r.hasWeights, isFalse);
+
+    r
+      ..setWeight('A', 0.5)
+      ..soberDiscount = true
+      ..soberMode = SoberMode.discount
+      ..discountPercent = 50
+      ..soberIds.add('A'); // 0.5 × 0.5 = 0.25 → 총 2.25
+    expect(r.exactShareFor('A'), closeTo(10000, 0.01));
+    expect(Settlement.fromJson(s.toJson()).rounds.first.weights['A'], 0.5);
+  });
+
+  test('차수 찬조: 나눌 금액에서 먼저 빼고, 찬조자는 찬조금 + 자기 몫', () {
+    final s = four(100000);
+    final r = s.rounds.first..setSponsor('A', 20000);
+    final pays = {for (final p in s.buildResults()) p.member.id: p.pay};
+    expect(pays['B'], 20000);
+    expect(pays['A'], 40000);
+    expect(s.totalToCollect, 100000);
+
+    // 외부(회사) 지원은 아무도 내지 않고, 걷을 돈이 줄어요
+    r
+      ..setSponsor('A', 0)
+      ..setSponsor(kExternalSponsor, 20000);
+    expect(s.externalTotal, 20000);
+    expect(s.totalToCollect, 80000);
+    expect(s.surplus, 0);
+
+    // 찬조가 나눌 금액보다 크면 비율대로 줄여서 계산
+    r.setSponsor('A', 180000); // 합계 200,000 → 절반씩
+    expect(r.sponsorsOverflow, isTrue);
+    expect(r.sponsorOf('A'), 90000);
+    expect(r.externalSponsor, 10000);
+  });
+
+  test('전체 찬조: 모두의 몫에서 같은 비율로 빠지고 산식에 표시', () {
+    final s = Settlement.sample()..isSample = false;
+    final minsu = s.members[1];
+    s.setSponsor(minsu.id, 46000); // 184,000 중 46,000 → 모두 75%
+    final results = s.buildResults();
+    final hyunwoo = results.firstWhere((p) => p.member.name == '현우');
+    expect(hyunwoo.exactTotal, closeTo(22500, 0.01));
+    final m = results.firstWhere((p) => p.member.id == minsu.id);
+    expect(m.sponsorPaid, 46000);
+    expect(s.formulaFor(m), contains('찬조 46,000'));
+    expect(s.formulaFor(hyunwoo), '1차 30,000 − 지원·적립 7,500 = 22,500');
+    expect(s.totalToCollect, 184000);
+
+    final restored = Settlement.fromJson(s.toJson());
+    expect(restored.sponsors[minsu.id], 46000);
+  });
+
+  test('모임 적립금: 자투리가 쌓이고 다음 정산에서 쓰면 줄어요', () async {
+    SharedPreferences.setMockInitialValues({});
+    await AppStorage.init();
+
+    Settlement make() => Settlement.sample()
+      ..isSample = false
+      ..groupName = '동기'
+      ..roundUnit = 1000;
+
+    final s1 = make();
+    expect(s1.surplus, 2000); // 186,000 걷고 184,000 지출
+    await AppStorage.saveSettlement(s1);
+    expect(AppStorage.groupFund('동기'), 2000);
+
+    final s2 = make()..carryIn = AppStorage.groupFund('동기');
+    expect(s2.effectiveCarryIn, 2000);
+    expect(s2.totalToCollect, 182000);
+    expect(s2.surplus, 1000); // 183,000 걷음
+    await AppStorage.saveSettlement(s2);
+    expect(AppStorage.groupFund('동기'), 1000);
+    expect(AppStorage.groupFund('동기', excludeId: s2.id), 2000);
+    expect(Settlement.fromJson(s2.toJson()).carryIn, 2000);
+  });
+
+  test('모임 그룹 자투리 규칙 저장 + 백업 권유 시점', () async {
+    final g = MemberGroup(
+      name: '동기',
+      names: const ['나', '민수'],
+      roundUnit: 1000,
+      roundMode: RoundMode.nearest,
+    );
+    final back = MemberGroup.fromJson(g.toJson())!;
+    expect(back.roundUnit, 1000);
+    expect(back.roundMode, RoundMode.nearest);
+    expect(back.ruleLabel, '1,000원 단위 반올림');
+    expect(MemberGroup.fromJson({'name': 'x', 'names': ['a']})!.hasRule, isFalse);
+
+    SharedPreferences.setMockInitialValues({});
+    await AppStorage.init();
+    final now = DateTime(2026, 11, 29);
+    expect(AppStorage.backupDue(now), isFalse); // 기록이 적으면 권하지 않음
+    for (var i = 0; i < 3; i++) {
+      await AppStorage.saveSettlement(Settlement.sample()..isSample = false);
+    }
+    expect(AppStorage.backupDue(now), isTrue);
+    await AppStorage.markBackedUp(now.subtract(const Duration(days: 3)));
+    expect(AppStorage.backupDue(now), isFalse);
+  });
 }
