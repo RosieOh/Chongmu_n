@@ -95,7 +95,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
     if (lines.isEmpty) return;
     b
       ..writeln()
-      ..writeln('👉 눌러서 바로 송금');
+      ..writeln('[바로 송금]');
     lines.forEach(b.writeln);
   }
 
@@ -163,7 +163,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
     final allPaid = _dues.every(_isPaid);
     if (nowPaid && allPaid) {
       HapticFeedback.mediumImpact();
-      _toast('🎉 모두 입금 완료! 수고했어요, 총무님');
+      _toast('모두 입금 완료! 수고했어요, 총무님');
       // 다 받았으니 예약한 미입금 알림은 취소
       if (s.remindAt != null) {
         s.remindAt = null;
@@ -180,8 +180,8 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
     final s = widget.settlement;
     final title = s.title.trim().isEmpty ? '모임' : s.title.trim();
     final b = StringBuffer()
-      ..writeln('📢 [$title] 정산 입금 안내')
-      ..writeln('아직 입금 확인이 안 된 분들이에요 🙏')
+      ..writeln('[$title] 정산 입금 안내')
+      ..writeln('아직 입금 확인이 안 된 분들이에요')
       ..writeln();
     for (final d in _dues.where((d) => !_isPaid(d))) {
       if (_transferMode) {
@@ -199,7 +199,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
       };
       final lines = [
         for (final m in receivers.values)
-          if (_accountOf(m).isNotEmpty) '🏦 ${m.name}: ${_accountOf(m)}',
+          if (_accountOf(m).isNotEmpty) '${m.name}: ${_accountOf(m)}',
       ];
       if (lines.isNotEmpty) {
         b.writeln();
@@ -210,7 +210,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
       if (account.isNotEmpty) {
         b
           ..writeln()
-          ..writeln('🏦 $account');
+          ..writeln('계좌 $account');
       }
     }
     if (!_transferMode ||
@@ -284,7 +284,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
     }
     setState(() => s.remindAt = at);
     AppStorage.saveSettlement(s);
-    _toast('${_reminderLabel(at)}에 알려드릴게요 🔔');
+    _toast('${_reminderLabel(at)}에 알려드릴게요');
   }
 
   Future<void> _cancelReminder() async {
@@ -307,7 +307,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
     final s = widget.settlement;
     final title = s.title.trim().isEmpty ? '모임' : s.title.trim();
     final b = StringBuffer()
-      ..writeln('📢 [$title] ${p.member.name}님 정산 안내')
+      ..writeln('[$title] ${p.member.name}님 정산 안내')
       ..writeln();
     for (var i = 0; i < s.rounds.length; i++) {
       final r = s.rounds[i];
@@ -318,7 +318,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
     if (p.pay == 0) {
       b
         ..writeln()
-        ..writeln('🎂 이번 정산은 면제예요!');
+        ..writeln('이번 정산은 면제예요!');
       return b.toString().trimRight();
     }
     b.writeln('= ${Fmt.won(p.pay)} (${s.roundingLabel})');
@@ -327,13 +327,13 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
     if (_transferMode) {
       b.writeln();
       if (due == null) {
-        b.writeln('보낼 돈은 없어요 (먼저 결제해 주셨어요 🙏)');
+        b.writeln('보낼 돈은 없어요 (먼저 결제해 주셨어요 )');
       } else {
-        b.writeln('🔁 이렇게 보내 주세요');
+        b.writeln('이렇게 보내 주세요');
         for (final t in due.transfers) {
           final acc = _accountOf(t.to);
           b.writeln('· ${t.to.name}에게 ${Fmt.won(t.amount)}'
-              '${acc.isEmpty ? '' : '\n  🏦 $acc'}');
+              '${acc.isEmpty ? '' : '\n  $acc'}');
         }
         if (due.transfers.any((t) => t.to.id == s.treasurer.id)) {
           _writePayLinks(b);
@@ -344,7 +344,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
       if (account.isNotEmpty) {
         b
           ..writeln()
-          ..writeln('🏦 $account');
+          ..writeln('계좌 $account');
       }
       _writePayLinks(b);
     }
@@ -355,7 +355,11 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
     if (r.isFree(memberId)) return '면제';
     final tags = <String>[
       if (r.hasSober && r.soberIds.contains(memberId))
-        '술X ${r.discountPercent}% 할인',
+        r.soberMode == SoberMode.split
+            ? '술값 제외'
+            : '안 마심 ${r.discountPercent}% 할인',
+      if ((r.weights[memberId] ?? 1.0) != 1.0)
+        '${weightLabel(r.weights[memberId]!)}배',
       if (r.extraOf(memberId) > 0) '추가 ${Fmt.won(r.extraOf(memberId))} 포함',
     ];
     final won = Fmt.won(share.round());
@@ -410,10 +414,53 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
     final b = StringBuffer();
     final title = s.title.trim().isEmpty ? '모임' : s.title.trim();
 
-    b.writeln('📢 [$title] 정산 안내');
+    b.writeln('[$title] 정산 안내');
     b.writeln(DateFormat('yyyy.MM.dd').format(_now));
     b.writeln();
-    b.writeln('🧾 차수별 내역');
+    // 받는 사람이 제일 궁금한 '내가 낼 돈'부터
+    if (_transferMode) {
+      b.writeln('[송금 정리]');
+      for (final d in _dues) {
+        for (final t in d.transfers) {
+          b.writeln('· ${t.from.name} → ${t.to.name}  ${Fmt.won(t.amount)}'
+              '${_isPaid(d) ? ' (완료)' : ''}');
+        }
+      }
+      if (_payeeAccounts.isNotEmpty) {
+        b.writeln();
+        b.writeln('[받는 계좌]');
+        for (final m in _payees) {
+          final acc = _payeeAccounts[m.id];
+          if (acc != null) b.writeln('· ${m.name}: $acc');
+        }
+      }
+      b.writeln();
+      b.writeln('[각자 부담할 돈]');
+      for (final p in _results) {
+        b.writeln('· ${p.member.name}  ${Fmt.won(p.pay)}');
+      }
+    } else {
+      b.writeln('[각자 보낼 돈]');
+      for (final p in _results) {
+        if (p.pay == 0) {
+          b.writeln('· ${p.member.name}  면제');
+          continue;
+        }
+        b.writeln('· ${p.member.name}  ${Fmt.won(p.pay)}'
+            '${_isMemberPaid(p.member.id) ? ' (입금완료)' : ''}');
+      }
+    }
+
+    final account = _accountLine();
+    if (account.isNotEmpty) {
+      b.writeln();
+      b.writeln(_transferMode ? '[${s.treasurer.name} 계좌]' : '[입금 계좌]');
+      b.writeln(account);
+    }
+    _writePayLinks(b);
+
+    b.writeln();
+    b.writeln('[차수별 내역]');
     for (var i = 0; i < s.rounds.length; i++) {
       final r = s.rounds[i];
       if (r.amount <= 0) continue;
@@ -422,52 +469,8 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
       b.writeln('· ${s.roundLabel(i)}  ${Fmt.won(r.netAmount)} '
           '(${r.headCount}명$sale$payer)');
     }
-    b.writeln('= 총 ${Fmt.won(s.totalSpent)}');
-    b.writeln();
-    if (_transferMode) {
-      b.writeln('💸 1인별 부담액');
-      for (final p in _results) {
-        b.writeln('· ${p.member.name}  ${Fmt.won(p.pay)}');
-      }
-      b.writeln();
-      b.writeln('🔁 송금 정리');
-      for (final d in _dues) {
-        for (final t in d.transfers) {
-          b.writeln('· ${t.from.name} → ${t.to.name}  ${Fmt.won(t.amount)}'
-              '${_isPaid(d) ? ' ✅완료' : ''}');
-        }
-      }
-      if (_payeeAccounts.isNotEmpty) {
-        b.writeln();
-        b.writeln('🏦 받는 계좌');
-        for (final m in _payees) {
-          final acc = _payeeAccounts[m.id];
-          if (acc != null) b.writeln('· ${m.name}: $acc');
-        }
-      }
-    } else {
-      b.writeln('💸 1인별 입금액');
-      for (final p in _results) {
-        if (p.pay == 0) {
-          b.writeln('· ${p.member.name}  면제 🎂');
-          continue;
-        }
-        b.writeln('· ${p.member.name}  ${Fmt.won(p.pay)}'
-            '${_isMemberPaid(p.member.id) ? ' ✅입금완료' : ''}');
-      }
-    }
-
-    final account = _accountLine();
-    if (account.isNotEmpty) {
-      b.writeln();
-      b.writeln(_transferMode ? '🏦 ${s.treasurer.name} 계좌' : '🏦 입금 계좌');
-      b.writeln(account);
-    }
-    _writePayLinks(b);
-
-    b.writeln();
-    b.writeln('※ ${s.roundingLabel} 정산');
-    if (!isPro) b.writeln('— 똑똑한 총무 앱으로 정산했어요');
+    b.writeln('= 총 ${Fmt.won(s.totalSpent)} · ${s.roundingLabel}');
+    if (!isPro) b.writeln("— 1/N이 안 맞는 회식 정산은 '똑똑한 총무' 앱으로");
     return b.toString().trimRight();
   }
 
@@ -488,7 +491,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
     if (!mounted) return;
     _toast(_accountLine().isEmpty
         ? '복사 완료! (계좌를 입력하면 함께 복사돼요)'
-        : '복사 완료! 카톡 대화방에 붙여넣기 하세요 💬');
+        : '복사 완료! 카톡 대화방에 붙여넣기 하세요');
   }
 
   // ───────────────── 영수증 이미지 ─────────────────
@@ -595,7 +598,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
                   Padding(
                     padding: const EdgeInsets.only(top: 8),
                     child: Text(
-                      '💡 영수증에서 이름을 누르면 개인별 상세와 갠톡 메시지를 볼 수 있어요',
+                      '영수증에서 이름을 누르면 개인별 상세와 갠톡 메시지를 볼 수 있어요',
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         fontSize: 12,
@@ -603,6 +606,8 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
                       ),
                     ),
                   ),
+                  const SizedBox(height: 12),
+                  _KakaoRequestCard(onTap: _openCopyMode),
                   const SizedBox(height: 12),
                   _buildPaymentCard(),
                   if (_payees.isNotEmpty) ...[
@@ -618,6 +623,22 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
           ),
         );
       },
+    );
+  }
+
+  /// 카카오페이 정산하기 '직접 입력'에 옮겨 적기 쉽게 크게 보여줘요
+  void _openCopyMode() {
+    HapticFeedback.lightImpact();
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: context.colors.card,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (_) => _CopyModeSheet(
+        dues: _dues,
+        messages: kakaoRequestMessages(widget.settlement),
+        onCopied: _toast,
+      ),
     );
   }
 
@@ -663,7 +684,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
           const SizedBox(height: 4),
           Text(
             allPaid
-                ? '🎉 모두 입금 완료! 수고했어요, 총무님'
+                ? '모두 입금 완료! 수고했어요, 총무님'
                 : _transferMode
                     ? '여러 명이 나눠 결제해서, 아래처럼 보내면 끝나요'
                     : '입금한 사람을 눌러서 체크하세요',
@@ -1370,8 +1391,10 @@ class _ReceiptPaper extends StatelessWidget {
   Widget build(BuildContext context) {
     final s = settlement;
     final collected = Settlement.totalCollected(results);
-    final surplus = collected - s.totalSpent;
+    final surplus = collected - s.totalToCollect;
     final title = s.title.trim().isEmpty ? '우리 모임' : s.title.trim();
+    final external = s.externalTotal;
+    final carry = s.effectiveCarryIn;
 
     return ClipPath(
       clipper: _ZigzagClipper(),
@@ -1428,15 +1451,8 @@ class _ReceiptPaper extends StatelessWidget {
             ),
             const SizedBox(height: 14),
 
-            // ── 차수별 상세 ──
-            Text('차수별 내역', style: _section),
-            const SizedBox(height: 8),
-            for (var i = 0; i < s.rounds.length; i++)
-              if (s.rounds[i].amount > 0) _roundRow(i),
-            const _DashedLine(),
-
             // ── 인원별 입금액 ──
-            Text(transfers.isEmpty ? '인원별 입금액' : '인원별 부담액', style: _section),
+            Text(transfers.isEmpty ? '각자 보낼 돈' : '각자 부담할 돈', style: _section),
             const SizedBox(height: 8),
             for (final p in results) _personRow(p),
             const _DashedLine(),
@@ -1457,57 +1473,15 @@ class _ReceiptPaper extends StatelessWidget {
                         _body,
                       ),
                       if (payeeAccounts[t.to.id] != null)
-                        Text('🏦 ${payeeAccounts[t.to.id]}', style: _sub),
+                        Text('계좌 ${payeeAccounts[t.to.id]}', style: _sub),
                     ],
                   ),
                 ),
               const _DashedLine(),
             ],
 
-            // ── 합계 / 자투리 ──
-            _row('총 걷는 금액', Fmt.won(collected), _body),
-            const SizedBox(height: 6),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              decoration: BoxDecoration(
-                color: context.colors.primaryLight,
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Row(
-                children: [
-                  const Text(
-                    '총무 자투리 잔액',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w800,
-                      color: AppColors.primary,
-                    ),
-                  ),
-                  const Spacer(),
-                  Text(
-                    '${surplus >= 0 ? '+' : ''}${Fmt.won(surplus)}',
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w900,
-                      color: AppColors.primary,
-                      fontFeatures: _num,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              s.roundUnit == 1
-                  ? '1원 단위까지 정확히 나눴어요'
-                  : '${s.roundingLabel}으로 생긴 금액이에요',
-              style: _sub,
-              textAlign: TextAlign.right,
-            ),
-
             // ── 입금 계좌 ──
             if (accountLine.isNotEmpty) ...[
-              const SizedBox(height: 14),
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
@@ -1528,25 +1502,104 @@ class _ReceiptPaper extends StatelessWidget {
                   ],
                 ),
               ),
+              const _DashedLine(),
             ],
+            // ── 차수별 상세 ──
+            Text('차수별 내역', style: _section),
+            const SizedBox(height: 8),
+            for (var i = 0; i < s.rounds.length; i++)
+              if (s.rounds[i].amount > 0) _roundRow(i),
+            const _DashedLine(),
 
-            // ── 로고 워터마크 (PRO 구매 시 제거) ──
-            if (showWatermark) ...[
-              const SizedBox(height: 20),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
+            // ── 합계 / 자투리 ──
+            if (external > 0) ...[
+              _row('회사·외부 지원', '−${Fmt.won(external)}', _body),
+              const SizedBox(height: 6),
+            ],
+            if (carry > 0) ...[
+              _row('"${s.groupName}" 적립금 사용', '−${Fmt.won(carry)}', _body),
+              const SizedBox(height: 6),
+            ],
+            _row('총 걷는 금액', Fmt.won(collected), _body),
+            const SizedBox(height: 6),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: _paper.background,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Row(
                 children: [
-                  AppLogo(size: 18),
-                  SizedBox(width: 6),
                   Text(
-                    '똑똑한 총무로 정산했어요',
+                    '총무 자투리 잔액',
                     style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: context.colors.hint,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      color: _paper.subText,
+                    ),
+                  ),
+                  const Spacer(),
+                  Text(
+                    '${surplus >= 0 ? '+' : ''}${Fmt.won(surplus)}',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w800,
+                      color: _paper.text,
+                      fontFeatures: _num,
                     ),
                   ),
                 ],
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              s.groupName.isNotEmpty && surplus != 0
+                  ? '${surplus > 0 ? '남는' : '모자란'} ${Fmt.won(surplus.abs())}은 "${s.groupName}" 적립금으로 넘어가요'
+                  : s.roundUnit == 1
+                      ? '1원 단위까지 정확히 나눴어요'
+                      : '${s.roundingLabel}으로 생긴 금액이에요',
+              style: _sub,
+              textAlign: TextAlign.right,
+            ),
+
+            // ── 하단 안내 (PRO 구매 시 제거) — 카톡방에서 이 앱을 처음 보는 사람용 ──
+            if (showWatermark) ...[
+              const SizedBox(height: 20),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                decoration: BoxDecoration(
+                  border: Border.all(color: _paper.border),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Row(
+                  children: [
+                    const AppLogo(size: 28),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '똑똑한 총무',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w800,
+                              color: _paper.text,
+                            ),
+                          ),
+                          Text(
+                            '회식 정산 계산기 · 앱스토어에서 검색',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: _paper.subText,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ],
           ],
@@ -1572,7 +1625,16 @@ class _ReceiptPaper extends StatelessWidget {
     final detail = StringBuffer(
         '${r.headCount}명 · 1인 ${Fmt.won(r.perPerson(unit, mode))}');
     if (r.hasSober) {
-      detail.write(' · 술X ${Fmt.won(r.soberPerPerson(unit, mode))}');
+      if (r.alcoholPart > 0) {
+        detail.write(' · 술값 ${Fmt.won(r.alcoholPart)}은 마신 사람끼리');
+      }
+      detail.write(' · 안 마신 사람 ${Fmt.won(r.soberPerPerson(unit, mode))}');
+    }
+    if (r.hasWeights) {
+      detail.write(' · 비율 조정 ${r.weights.length}명');
+    }
+    if (r.sponsors.isNotEmpty) {
+      detail.write(' · 찬조 ${Fmt.won(r.sponsorTotal)}');
     }
     if (r.hasFree) {
       detail.write(' · 면제 ${r.freeIds.length}명');
@@ -1599,15 +1661,22 @@ class _ReceiptPaper extends StatelessWidget {
     );
   }
 
-  /// '1차', '2차(술X)', '1차(+12,000)' 처럼 참석 차수 표시
+  /// '1차', '2차(안 마심)', '1차(+12,000)' 처럼 참석 차수 표시
   String _attendLabel(int i, RoundItem r, String memberId) {
     final tags = <String>[
       if (r.isFree(memberId)) '면제',
-      if (r.hasSober && r.soberIds.contains(memberId)) '술X',
+      if (r.hasSober && r.soberIds.contains(memberId)) '안 마심',
       if (r.extraOf(memberId) > 0) '+${Fmt.number(r.extraOf(memberId))}',
     ];
     return tags.isEmpty ? '${i + 1}차' : '${i + 1}차(${tags.join(', ')})';
   }
+
+  /// 산식 줄이 의미가 있을 때만 (차수 2개 이상, 찬조·차감, 자투리 올림)
+  bool _needsFormula(PersonResult p) =>
+      p.roundShares.length > 1 ||
+      p.sponsorPaid > 0 ||
+      p.deduction.round() > 0 ||
+      p.pay != p.exactTotal.round();
 
   Widget _personRow(PersonResult p) {
     final rounds = settlement.rounds;
@@ -1638,6 +1707,11 @@ class _ReceiptPaper extends StatelessWidget {
                   ),
                   const SizedBox(height: 2),
                   Text(attended.join(' · '), style: _sub),
+                  if (_needsFormula(p))
+                    Text(
+                      settlement.formulaFor(p),
+                      style: _sub.copyWith(color: _paper.hint),
+                    ),
                 ],
               ),
             ),
@@ -1758,7 +1832,7 @@ class _PersonSheet extends StatelessWidget {
                   ),
                 ),
                 Text(
-                  p.pay == 0 ? '면제 🎂' : Fmt.won(p.pay),
+                  p.pay == 0 ? '면제' : Fmt.won(p.pay),
                   style: const TextStyle(
                     fontSize: 20,
                     fontWeight: FontWeight.w900,
@@ -1812,7 +1886,7 @@ class _PersonSheet extends StatelessWidget {
                           style: body,
                         ),
                         if (accountOf(t.to).isNotEmpty)
-                          Text('🏦 ${accountOf(t.to)}', style: sub),
+                          Text('계좌 ${accountOf(t.to)}', style: sub),
                       ],
                     ),
                   )
@@ -1830,6 +1904,239 @@ class _PersonSheet extends StatelessWidget {
                 label: const Text('개인 메시지 복사'),
               ),
             ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 카카오페이 정산 요청 메시지 추천 (카카오페이 메시지는 25자까지)
+List<String> kakaoRequestMessages(Settlement s, {int limit = 25}) {
+  final raw = s.title.trim();
+  String fit(String Function(String t) make) {
+    var t = raw;
+    var msg = make(t);
+    while (msg.characters.length > limit && t.isNotEmpty) {
+      t = t.characters.take(t.characters.length - 1).toString();
+      msg = make(t.isEmpty ? '' : '$t…');
+    }
+    return msg.characters.take(limit).toString();
+  }
+
+  final n = s.rounds.where((r) => r.netAmount > 0).length;
+  return {
+    if (raw.isNotEmpty) fit((t) => '$t 정산이에요. 계산은 사진 참고!'),
+    if (raw.isNotEmpty && n > 1) fit((t) => '$t $n차까지 정산해요'),
+    '금액 근거는 첨부 사진에 있어요',
+    '오늘 즐거웠어요! 정산 부탁해요',
+  }.toList();
+}
+
+class _KakaoRequestCard extends StatelessWidget {
+  const _KakaoRequestCard({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: AppColors.kakao,
+      borderRadius: BorderRadius.circular(AppDecor.radius),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(AppDecor.radius),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 14, 12, 14),
+          child: Row(
+            children: [
+              const Icon(Icons.edit_note_rounded,
+                  color: AppColors.kakaoText, size: 26),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '카카오페이로 정산 요청하기',
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w800,
+                        color: AppColors.kakaoText,
+                      ),
+                    ),
+                    SizedBox(height: 2),
+                    Text(
+                      '옮겨 적을 금액과 요청 문구를 보여드려요',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: AppColors.kakaoText,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(Icons.chevron_right_rounded,
+                  color: AppColors.kakaoText.withValues(alpha: 0.6)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 옮겨 적기 모드 — 한 명씩 체크하며 카카오페이 '직접 입력'에 옮겨 적어요
+class _CopyModeSheet extends StatefulWidget {
+  const _CopyModeSheet({
+    required this.dues,
+    required this.messages,
+    required this.onCopied,
+  });
+
+  final List<Due> dues;
+  final List<String> messages;
+  final ValueChanged<String> onCopied;
+
+  @override
+  State<_CopyModeSheet> createState() => _CopyModeSheetState();
+}
+
+class _CopyModeSheetState extends State<_CopyModeSheet> {
+  final Set<String> _done = {};
+
+  Future<void> _copy(String text, String toast) async {
+    HapticFeedback.lightImpact();
+    await Clipboard.setData(ClipboardData(text: text));
+    widget.onCopied(toast);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    return SafeArea(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.sizeOf(context).height * 0.85,
+        ),
+        child: ListView(
+          shrinkWrap: true,
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+          children: [
+            Text(
+              '카카오페이에 옮겨 적기',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w800,
+                color: c.text,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              '단톡방 + → 송금 → 정산하기 → 직접 입력에서 같은 순서로 넣으세요. '
+              '넣은 사람은 눌러서 체크해 두면 헷갈리지 않아요.',
+              style: TextStyle(fontSize: 13, height: 1.45, color: c.subText),
+            ),
+            const SizedBox(height: 16),
+            for (final d in widget.dues)
+              InkWell(
+                borderRadius: BorderRadius.circular(12),
+                onTap: () => setState(() {
+                  HapticFeedback.selectionClick();
+                  if (!_done.remove(d.member.id)) _done.add(d.member.id);
+                }),
+                child: Padding(
+                  padding:
+                      const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
+                  child: Row(
+                    children: [
+                      Icon(
+                        _done.contains(d.member.id)
+                            ? Icons.check_circle_rounded
+                            : Icons.radio_button_unchecked_rounded,
+                        color: _done.contains(d.member.id)
+                            ? AppColors.primary
+                            : c.hint,
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          d.member.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w700,
+                            color:
+                                _done.contains(d.member.id) ? c.hint : c.text,
+                          ),
+                        ),
+                      ),
+                      Text(
+                        Fmt.number(d.amount),
+                        style: TextStyle(
+                          fontSize: 26,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: -0.5,
+                          fontFeatures: const [ui.FontFeature.tabularFigures()],
+                          color: _done.contains(d.member.id) ? c.hint : c.text,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            const SizedBox(height: 20),
+            Text(
+              '요청 메시지 (25자까지)',
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w800,
+                color: c.text,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              '누르면 복사돼요. 정산서 이미지는 사진으로 첨부하세요.',
+              style: TextStyle(fontSize: 12, color: c.subText),
+            ),
+            const SizedBox(height: 10),
+            for (final m in widget.messages)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Material(
+                  color: c.background,
+                  borderRadius: BorderRadius.circular(12),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(12),
+                    onTap: () => _copy(m, '요청 메시지를 복사했어요'),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 14, vertical: 12),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              m,
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                                color: c.text,
+                              ),
+                            ),
+                          ),
+                          Text(
+                            '${m.characters.length}자',
+                            style: TextStyle(fontSize: 12, color: c.hint),
+                          ),
+                          const SizedBox(width: 8),
+                          Icon(Icons.copy_rounded, size: 16, color: c.subText),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
           ],
         ),
       ),

@@ -1,5 +1,5 @@
 name: chongmu_n
-description: "똑똑한 총무 - 차수별 N빵 정산기"
+description: "똑똑한 총무 - 1/N이 안 맞는 회식 정산 계산기"
 publish_to: "none"
 
 # 스토어에 새 버전을 올릴 때마다 + 뒤 숫자(빌드 번호)를 1씩 올려주세요.

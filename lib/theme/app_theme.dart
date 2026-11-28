@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
@@ -14,6 +16,9 @@ class AppColors {
 
   /// 딥 차콜 (로고 그라데이션 등 모드와 무관하게 쓰는 브랜드 보조색)
   static const Color charcoal = Color(0xFF1E2229);
+
+  /// 로고 조각·포인트 강조용 웜 옐로
+  static const Color accent = Color(0xFFFFC94D);
 
   static const Color danger = Color(0xFFF04452);
   static const Color kakao = Color(0xFFFEE500);
@@ -144,7 +149,7 @@ extension AppPaletteContext on BuildContext {
 class AppDecor {
   AppDecor._();
 
-  static const double radius = 14;
+  static const double radius = 18;
 
   static List<BoxShadow> shadow(BuildContext context) => [
         BoxShadow(
@@ -154,11 +159,10 @@ class AppDecor {
         ),
       ];
 
-  /// 직방 스타일 카드 (radius 14 + 은은한 그림자)
+  /// 기본 카드 — 회색 배경 위 그림자 없는 흰 카드 (메인 화면과 같은 톤)
   static BoxDecoration card(BuildContext context) => BoxDecoration(
         color: context.colors.card,
         borderRadius: BorderRadius.circular(radius),
-        boxShadow: shadow(context),
       );
 
   /// 회색 박스형 입력창
@@ -277,59 +281,132 @@ class AppTheme {
   }
 }
 
-/// 🖼 내가 만든 로고 (assets/images/logo.png)
-/// 파일이 아직 없으면 퍼스널 컬러 배경의 기본 아이콘 로고가 대신 표시됩니다.
+/// 🖼 앱 로고 — 동전(파이)에서 한 조각이 빠져나온 모양 = "N빵 나누기"
+///
+/// 벡터로 그려서 어떤 크기에서도 선명합니다. 앱 아이콘 PNG 도 이 그림으로 만들어요.
+/// - [badge] true: 브랜드 컬러 둥근 사각형 배지 위에 흰 마크 (기본)
+/// - [badge] false: 배경 없이 마크만 (스플래시처럼 컬러 배경 위에 올릴 때)
 class AppLogo extends StatelessWidget {
-  const AppLogo({
-    super.key,
-    this.size = 32,
-    this.assetPath = 'assets/images/logo.png',
-  });
+  const AppLogo({super.key, this.size = 32, this.badge = true});
 
   final double size;
-  final String assetPath;
+  final bool badge;
 
   @override
   Widget build(BuildContext context) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(size * 0.28),
-      child: Image.asset(
-        assetPath,
-        width: size,
-        height: size,
-        fit: BoxFit.cover,
-        errorBuilder: (context, error, stackTrace) => _FallbackLogo(size: size),
-      ),
+    return SizedBox.square(
+      dimension: size,
+      child: CustomPaint(painter: LogoPainter(badge: badge)),
     );
   }
 }
 
-class _FallbackLogo extends StatelessWidget {
-  const _FallbackLogo({required this.size});
+/// [AppLogo] 를 그리는 페인터 (아이콘 이미지 생성에도 사용)
+class LogoPainter extends CustomPainter {
+  const LogoPainter({this.badge = true, this.rounded = true});
 
-  final double size;
+  final bool badge;
+
+  /// false 면 배지를 꽉 찬 사각형으로 (iOS 앱 아이콘은 시스템이 모서리를 깎아요)
+  final bool rounded;
+
+  static const double _deg = math.pi / 180;
 
   @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: size,
-      height: size,
-      alignment: Alignment.center,
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
+  void paint(Canvas canvas, Size size) {
+    final s = size.shortestSide;
+    final rect = Offset.zero & Size.square(s);
+
+    if (badge) {
+      final paint = Paint()
+        ..shader = LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [
-            AppColors.primary,
-            Color.lerp(AppColors.primary, AppColors.charcoal, 0.25)!,
+            Color.lerp(AppColors.primary, Colors.white, 0.08)!,
+            Color.lerp(AppColors.primary, AppColors.charcoal, 0.28)!,
           ],
+        ).createShader(rect);
+      if (rounded) {
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(rect, Radius.circular(s * 0.28)),
+          paint,
+        );
+      } else {
+        canvas.drawRect(rect, paint);
+      }
+    }
+
+    // 마크 크기: 배지 안에서는 여백을 두고, 단독일 때는 꽉 채워요
+    final scale = badge ? 1.0 : 1.32;
+    final r = s * 0.27 * scale;
+    final c = Offset(s * 0.47, s * 0.53);
+
+    // ① 한 조각(60°)이 빠진 동전
+    final pie = Path()
+      ..moveTo(c.dx, c.dy)
+      ..arcTo(Rect.fromCircle(center: c, radius: r), 0, 300 * _deg, false)
+      ..close();
+    canvas.drawPath(pie, Paint()..color = Colors.white);
+
+    // 동전 안쪽 테두리 (동전 느낌) — 빠진 조각 자리엔 그리지 않아요
+    canvas.save();
+    canvas.clipPath(pie);
+    canvas.drawCircle(
+      c,
+      r * 0.62,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = r * 0.11
+        ..color = AppColors.primary.withValues(alpha: 0.22),
+    );
+    canvas.restore();
+
+    // ② 빠져나온 조각 — 오른쪽 위로 살짝 떨어져서
+    const mid = -30 * _deg;
+    final gap = r * 0.26;
+    final sc = c + Offset(math.cos(mid), math.sin(mid)) * gap;
+    final slice = Path()
+      ..moveTo(sc.dx, sc.dy)
+      ..arcTo(
+          Rect.fromCircle(center: sc, radius: r), -60 * _deg, 60 * _deg, false)
+      ..close();
+    canvas.drawPath(slice, Paint()..color = AppColors.accent);
+  }
+
+  @override
+  bool shouldRepaint(LogoPainter old) =>
+      old.badge != badge || old.rounded != rounded;
+}
+
+/// "똑똑한 총무" 워드마크 (로고 옆 글자)
+class AppWordmark extends StatelessWidget {
+  const AppWordmark({super.key, this.fontSize = 20, this.color});
+
+  final double fontSize;
+
+  /// null 이면 모드별 기본 글자색 + '총무'만 브랜드 컬러
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) {
+    final base = TextStyle(
+      fontSize: fontSize,
+      fontWeight: FontWeight.w900,
+      letterSpacing: -0.6,
+      height: 1.1,
+      color: color ?? context.colors.text,
+    );
+    return Text.rich(
+      TextSpan(children: [
+        const TextSpan(text: '똑똑한 '),
+        TextSpan(
+          text: '총무',
+          style: TextStyle(color: color ?? AppColors.primary),
         ),
-      ),
-      child: Icon(
-        Icons.receipt_long_rounded,
-        color: Colors.white,
-        size: size * 0.58,
-      ),
+      ]),
+      style: base,
+      maxLines: 1,
     );
   }
 }

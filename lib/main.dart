@@ -2,7 +2,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 
 import 'models/round_item.dart';
-import 'screens/home_screen.dart';
+import 'screens/splash_screen.dart';
 import 'screens/settings_screen.dart';
 import 'theme/app_theme.dart';
 
@@ -32,7 +32,7 @@ class ChongmuApp extends StatelessWidget {
     return ValueListenableBuilder<ThemeMode>(
       valueListenable: ThemeModeController.instance.mode,
       builder: (context, mode, _) => MaterialApp(
-        title: '똑똑한 총무 - 차수별 N빵 정산기',
+        title: '똑똑한 총무',
         debugShowCheckedModeBanner: false,
         theme: AppTheme.light,
         darkTheme: AppTheme.dark,
@@ -47,7 +47,7 @@ class ChongmuApp extends StatelessWidget {
             child: child!,
           );
         },
-        home: const HomeScreen(),
+        home: const SplashScreen(),
       ),
     );
   }

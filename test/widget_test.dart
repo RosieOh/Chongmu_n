@@ -1,7 +1,9 @@
 import 'package:chongmu_n/models/round_item.dart';
 import 'package:chongmu_n/screens/history_screen.dart';
 import 'package:chongmu_n/screens/ledger_screen.dart';
+import 'package:chongmu_n/screens/receipt_screen.dart';
 import 'package:chongmu_n/services/reminder_service.dart';
+import 'package:flutter/widgets.dart' show StringCharacters;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -725,5 +727,16 @@ void main() {
     expect(AppStorage.backupDue(now), isTrue);
     await AppStorage.markBackedUp(now.subtract(const Duration(days: 3)));
     expect(AppStorage.backupDue(now), isFalse);
+  });
+
+  test('카카오페이 요청 메시지는 모두 25자 이내', () {
+    final s = Settlement.sample()
+      ..title = '아주아주 긴 이름의 대학교 동아리 연말 송년회 모임';
+    final msgs = kakaoRequestMessages(s);
+    expect(msgs, isNotEmpty);
+    for (final m in msgs) {
+      expect(m.characters.length, lessThanOrEqualTo(25), reason: m);
+    }
+    expect(msgs.first, startsWith('아주'));
   });
 }

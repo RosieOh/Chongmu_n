@@ -1,6 +1,11 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
+
+import 'package:intl/intl.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../models/round_item.dart';
 import '../theme/app_theme.dart';
@@ -97,10 +102,13 @@ class ProManager {
 // ═════════════════════════════════════════════
 
 class SettingsScreen extends StatefulWidget {
-  const SettingsScreen({super.key, this.current});
+  const SettingsScreen({super.key, this.current, this.onAction});
 
   /// 지금 메인 화면의 정산 (백업에 함께 담아요)
   final Settlement? current;
+
+  /// 하단 탭 안에 들어갈 때: 화면을 닫는 대신 이 콜백으로 알려요
+  final ValueChanged<SettingsAction>? onAction;
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -125,7 +133,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final ok = await ProManager.instance.purchase();
     if (!mounted) return;
     setState(() => _buying = false);
-    _toast(ok ? 'PRO 가 적용되었어요. 감사합니다! 🎉' : '결제 기능을 준비 중이에요. 조금만 기다려 주세요!');
+    _toast(ok ? 'PRO 가 적용되었어요. 감사합니다!' : '결제 기능을 준비 중이에요. 조금만 기다려 주세요!');
   }
 
   Future<void> _restore() async {
@@ -142,9 +150,43 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final current = widget.current ?? AppStorage.loadSettlement();
     await Clipboard.setData(
         ClipboardData(text: AppStorage.exportBackup(current)));
+    await AppStorage.markBackedUp();
     if (!mounted) return;
+    setState(() {});
     final count = AppStorage.loadHistory().length;
     _toast('정산 $count건을 복사했어요. 메모장이나 나에게 보내기로 보관하세요');
+  }
+
+  /// 백업 파일(.json)로 내보내기 — 파일 앱·드라이브·나에게 보내기로 보관
+  Future<void> _shareBackupFile() async {
+    HapticFeedback.lightImpact();
+    final current = widget.current ?? AppStorage.loadSettlement();
+    final bytes = utf8.encode(AppStorage.exportBackup(current));
+    final name =
+        'chongmu_backup_${DateFormat('yyyyMMdd').format(DateTime.now())}.json';
+    try {
+      final result = await SharePlus.instance.share(ShareParams(
+        files: [
+          XFile.fromData(bytes, mimeType: 'application/json', name: name)
+        ],
+        fileNameOverrides: [name],
+        subject: '똑똑한 총무 백업',
+      ));
+      if (result.status == ShareResultStatus.dismissed) return;
+      await AppStorage.markBackedUp();
+      if (!mounted) return;
+      setState(() {});
+      _toast('백업 파일을 저장했어요');
+    } catch (_) {
+      if (mounted) _toast('파일을 내보내지 못했어요. 백업 복사하기를 써 주세요');
+    }
+  }
+
+  String get _lastBackupText {
+    final at = AppStorage.lastBackupAt;
+    if (at == null) return '아직 백업한 적이 없어요';
+    final days = DateTime.now().difference(at).inDays;
+    return days == 0 ? '오늘 백업했어요' : '마지막 백업 $days일 전';
   }
 
   Future<void> _restoreBackup() async {
@@ -230,8 +272,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ],
       ),
     );
-    if (ok == true && mounted) {
-      Navigator.of(context).pop(SettingsAction.newSettlement);
+    if (ok == true && mounted) _finish(SettingsAction.newSettlement);
+  }
+
+  void _finish(SettingsAction action) {
+    final onAction = widget.onAction;
+    if (onAction != null) {
+      onAction(action);
+    } else {
+      Navigator.of(context).pop(action);
     }
   }
 
@@ -289,7 +338,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       subtitle: '삼겹살·호프집 예시로 다시 채워요',
                       onTap: () {
                         HapticFeedback.lightImpact();
-                        Navigator.of(context).pop(SettingsAction.loadSample);
+                        _finish(SettingsAction.loadSample);
                       },
                     ),
                   ],
@@ -302,16 +351,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 child: Column(
                   children: [
                     _Tile(
+                      icon: Icons.save_alt_rounded,
+                      title: '백업 파일로 저장',
+                      subtitle: '$_lastBackupText · 파일 앱이나 나에게 보내기로 보관',
+                      onTap: _shareBackupFile,
+                    ),
+                    const Divider(indent: 56),
+                    _Tile(
                       icon: Icons.copy_all_rounded,
                       title: '백업 복사하기',
-                      subtitle: '휴대폰을 바꾸기 전에 복사해서 보관하세요',
+                      subtitle: '메모장에 붙여 넣어 보관해도 돼요',
                       onTap: _copyBackup,
                     ),
                     const Divider(indent: 56),
                     _Tile(
                       icon: Icons.content_paste_go_rounded,
                       title: '복사한 백업으로 복원',
-                      subtitle: '백업 내용을 복사한 뒤 눌러 주세요',
+                      subtitle: '백업 파일을 열어 내용을 복사한 뒤 눌러 주세요',
                       onTap: _restoreBackup,
                     ),
                   ],
@@ -327,7 +383,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       icon: Icons.info_outline_rounded,
                       title: '버전',
                       trailing: Text(
-                        '1.3.0',
+                        '1.4.0',
                         style: TextStyle(color: context.colors.subText),
                       ),
                     ),
@@ -477,7 +533,7 @@ class _ProCard extends StatelessWidget {
                       ),
                     )
                   : Text(
-                      isPro ? 'PRO 이용 중이에요 🎉' : '3,300원 · 평생 소장하기',
+                      isPro ? 'PRO 이용 중이에요' : '3,300원 · 평생 소장하기',
                       style: const TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.w900,

@@ -58,10 +58,14 @@ String shortWon(int v) {
 ///
 /// 항목을 누르면 [HistoryPick] 을 돌려주고(Navigator.pop), 메인 화면이 불러옵니다.
 class HistoryScreen extends StatefulWidget {
-  const HistoryScreen({super.key, required this.currentId});
+  const HistoryScreen({super.key, required this.currentId, this.onPick});
 
   /// 지금 메인 화면에서 편집 중인 정산 ID
   final String currentId;
+
+  /// 하단 탭 안에 들어갈 때: 화면을 닫는 대신 이 콜백으로 알려요
+  /// (null 을 넘기면 '지금 정산 열기')
+  final ValueChanged<HistoryPick?>? onPick;
 
   @override
   State<HistoryScreen> createState() => _HistoryScreenState();
@@ -88,18 +92,24 @@ class _HistoryScreenState extends State<HistoryScreen> {
       ));
   }
 
+  /// 화면을 닫으며 결과 전달 (탭 안이면 콜백)
+  void _finish(HistoryPick? pick) {
+    final onPick = widget.onPick;
+    if (onPick != null) {
+      onPick(pick);
+    } else {
+      Navigator.of(context).pop(pick);
+    }
+  }
+
   void _open(Settlement s) {
     HapticFeedback.lightImpact();
-    if (s.id == widget.currentId) {
-      Navigator.of(context).pop();
-      return;
-    }
-    Navigator.of(context).pop(HistoryPick(s.id));
+    _finish(s.id == widget.currentId ? null : HistoryPick(s.id));
   }
 
   void _startNewFrom(Settlement s) {
     HapticFeedback.lightImpact();
-    Navigator.of(context).pop(HistoryPick(s.id, asNew: true));
+    _finish(HistoryPick(s.id, asNew: true));
   }
 
   /// 길게 누르면 나오는 메뉴
@@ -196,7 +206,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
     );
     if (!mounted) return;
     if (pick != null) {
-      Navigator.of(context).pop(pick);
+      _finish(pick);
       return;
     }
     // 장부에서 입금 확인한 내용 반영
@@ -618,7 +628,7 @@ class _StatsCard extends StatelessWidget {
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Text(
-                '🤝 가장 자주 함께한 멤버: ${best.first}',
+                '가장 자주 함께한 멤버: ${best.first}',
                 style: const TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w700,

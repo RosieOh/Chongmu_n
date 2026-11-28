@@ -11,8 +11,12 @@ import 'receipt_screen.dart';
 import 'settings_screen.dart';
 
 /// ① 메인 화면 — 차수별 정산 입력
+/// 정산 입력 화면 (멤버·차수·금액). 메인 화면에서 들어와요.
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key});
+  const HomeScreen({super.key, this.openGroupsOnStart = false});
+
+  /// true 면 화면이 뜨자마자 '모임 그룹' 시트를 열어요 (메인 화면 바로가기)
+  final bool openGroupsOnStart;
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -26,6 +30,7 @@ class _HomeScreenState extends State<HomeScreen> {
   late final TextEditingController _titleCtrl;
   final Map<String, TextEditingController> _amountCtrls = {};
   final Map<String, TextEditingController> _nameCtrls = {};
+  final Map<String, TextEditingController> _alcoholCtrls = {};
   Timer? _saveTimer;
 
   /// 방금 추가한 차수 → 금액칸 자동 포커스
@@ -39,6 +44,11 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
     _s = AppStorage.loadSettlement();
     _titleCtrl = TextEditingController(text: _s.title);
+    if (widget.openGroupsOnStart) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _openGroups();
+      });
+    }
   }
 
   @override
@@ -50,6 +60,9 @@ class _HomeScreenState extends State<HomeScreen> {
       c.dispose();
     }
     for (final c in _nameCtrls.values) {
+      c.dispose();
+    }
+    for (final c in _alcoholCtrls.values) {
       c.dispose();
     }
     super.dispose();
@@ -80,6 +93,12 @@ class _HomeScreenState extends State<HomeScreen> {
             text: r.amount > 0 ? Fmt.number(r.amount) : ''),
       );
 
+  TextEditingController _alcoholCtrl(RoundItem r) => _alcoholCtrls.putIfAbsent(
+        r.id,
+        () => TextEditingController(
+            text: r.alcoholAmount > 0 ? Fmt.number(r.alcoholAmount) : ''),
+      );
+
   TextEditingController _nameCtrl(RoundItem r) =>
       _nameCtrls.putIfAbsent(r.id, () => TextEditingController(text: r.name));
 
@@ -89,9 +108,14 @@ class _HomeScreenState extends State<HomeScreen> {
     _saveTimer?.cancel();
     AppStorage.saveSettlement(_s);
 
-    final old = [..._amountCtrls.values, ..._nameCtrls.values];
+    final old = [
+      ..._amountCtrls.values,
+      ..._nameCtrls.values,
+      ..._alcoholCtrls.values,
+    ];
     _amountCtrls.clear();
     _nameCtrls.clear();
+    _alcoholCtrls.clear();
     _titleCtrl.text = next.title;
     setState(() {
       _s = next;
@@ -312,8 +336,14 @@ class _HomeScreenState extends State<HomeScreen> {
     );
     if (res == null || res.delete || !mounted) return;
     final exists = AppStorage.groups.any((g) => g.name == res.name);
-    await AppStorage.saveGroup(MemberGroup(name: res.name, names: names));
+    await AppStorage.saveGroup(MemberGroup(
+      name: res.name,
+      names: names,
+      roundUnit: _s.roundUnit,
+      roundMode: _s.roundMode,
+    ));
     if (!mounted) return;
+    _update(() => _s.groupName = res.name);
     _toast(exists
         ? '"${res.name}" 그룹을 지금 멤버로 바꿨어요'
         : '"${res.name}" 그룹을 저장했어요 (${names.length}명)');
@@ -328,13 +358,15 @@ class _HomeScreenState extends State<HomeScreen> {
     final keepCurrent = _s.totalSpent > 0;
     _replaceSettlement(Settlement.fresh(
       members: members,
-      roundUnit: _s.roundUnit,
-      roundMode: _s.roundMode,
+      roundUnit: g.roundUnit ?? _s.roundUnit,
+      roundMode: g.roundMode ?? _s.roundMode,
       title: keepCurrent ? '' : _s.title,
+      groupName: g.name,
     ));
+    final rule = g.ruleLabel == null ? '' : ' · ${g.ruleLabel}';
     _toast(keepCurrent
-        ? '"${g.name}" 멤버로 새 정산을 시작했어요. 이전 정산은 지난 정산에 있어요'
-        : '"${g.name}" 멤버 ${members.length}명을 불러왔어요');
+        ? '"${g.name}" 멤버로 새 정산을 시작했어요$rule'
+        : '"${g.name}" 멤버 ${members.length}명을 불러왔어요$rule');
   }
 
   // ───────────────── 화면 이동 ─────────────────
@@ -394,6 +426,7 @@ class _HomeScreenState extends State<HomeScreen> {
         roundUnit: picked.roundUnit,
         roundMode: picked.roundMode,
         title: picked.title,
+        groupName: picked.groupName,
       ));
       _toast('"$title" 멤버로 새 정산을 시작했어요');
       return;
@@ -416,6 +449,7 @@ class _HomeScreenState extends State<HomeScreen> {
             members: _s.members,
             roundUnit: _s.roundUnit,
             roundMode: _s.roundMode,
+            groupName: _s.groupName,
           ),
         );
         _toast('새 정산을 시작했어요');
@@ -436,65 +470,75 @@ class _HomeScreenState extends State<HomeScreen> {
     return ValueListenableBuilder<bool>(
       valueListenable: ProManager.instance.isPro,
       builder: (context, isPro, _) {
-        return GestureDetector(
-          onTap: () => FocusScope.of(context).unfocus(),
-          child: Scaffold(
-            appBar: _buildAppBar(isPro),
-            body: Column(
-              children: [
-                _SummaryBanner(
-                  total: _s.totalSpent,
-                  people: _s.involvedCount,
-                ),
-                Expanded(
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
-                    keyboardDismissBehavior:
-                        ScrollViewKeyboardDismissBehavior.onDrag,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        AnimatedSize(
-                          duration: const Duration(milliseconds: 250),
-                          curve: Curves.easeOutCubic,
-                          alignment: Alignment.topCenter,
-                          child: _showTip
-                              ? Padding(
-                                  padding: const EdgeInsets.only(bottom: 12),
-                                  child: _TipCard(
-                                    onOk: () => _dismissTip(),
-                                    onStartBlank: () =>
-                                        _dismissTip(startBlank: true),
-                                  ),
-                                )
-                              : const SizedBox(width: double.infinity),
-                        ),
-                        _buildMembersCard(),
-                        const SizedBox(height: 12),
-                        for (var i = 0; i < _s.rounds.length; i++) ...[
-                          _buildRoundCard(i, _s.rounds[i]),
+        // 뒤로 가는 순간 바로 저장 → 메인 화면이 최신 내용을 보여줘요
+        return PopScope(
+          onPopInvokedWithResult: (didPop, _) {
+            if (!didPop) return;
+            _saveTimer?.cancel();
+            AppStorage.saveSettlement(_s);
+          },
+          child: GestureDetector(
+            onTap: () => FocusScope.of(context).unfocus(),
+            child: Scaffold(
+              appBar: _buildAppBar(isPro),
+              body: Column(
+                children: [
+                  _SummaryBanner(
+                    total: _s.totalSpent,
+                    people: _s.involvedCount,
+                  ),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+                      keyboardDismissBehavior:
+                          ScrollViewKeyboardDismissBehavior.onDrag,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          AnimatedSize(
+                            duration: const Duration(milliseconds: 250),
+                            curve: Curves.easeOutCubic,
+                            alignment: Alignment.topCenter,
+                            child: _showTip
+                                ? Padding(
+                                    padding: const EdgeInsets.only(bottom: 12),
+                                    child: _TipCard(
+                                      onOk: () => _dismissTip(),
+                                      onStartBlank: () =>
+                                          _dismissTip(startBlank: true),
+                                    ),
+                                  )
+                                : const SizedBox(width: double.infinity),
+                          ),
+                          _buildMembersCard(),
                           const SizedBox(height: 12),
+                          for (var i = 0; i < _s.rounds.length; i++) ...[
+                            _buildRoundCard(i, _s.rounds[i]),
+                            const SizedBox(height: 12),
+                          ],
+                          _DashedAddButton(
+                            label: '${_s.rounds.length + 1}차 추가하기',
+                            onTap: _addRound,
+                          ),
+                          const SizedBox(height: 12),
+                          _buildSettlementExtrasCard(),
+                          const SizedBox(height: 12),
+                          _buildRoundingCard(),
                         ],
-                        _DashedAddButton(
-                          label: '${_s.rounds.length + 1}차 추가하기',
-                          onTap: _addRound,
-                        ),
-                        const SizedBox(height: 12),
-                        _buildRoundingCard(),
-                      ],
+                      ),
                     ),
                   ),
-                ),
-                if (keyboardOpen) const _KeyboardDoneBar(),
-              ],
+                  if (keyboardOpen) const _KeyboardDoneBar(),
+                ],
+              ),
+              bottomNavigationBar: keyboardOpen
+                  ? null
+                  : _BottomBar(
+                      isPro: isPro,
+                      paidText: _paidProgressText(),
+                      onTap: _openReceipt,
+                    ),
             ),
-            bottomNavigationBar: keyboardOpen
-                ? null
-                : _BottomBar(
-                    isPro: isPro,
-                    paidText: _paidProgressText(),
-                    onTap: _openReceipt,
-                  ),
           ),
         );
       },
@@ -503,12 +547,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
   PreferredSizeWidget _buildAppBar(bool isPro) {
     return AppBar(
-      titleSpacing: 16,
+      titleSpacing: Navigator.canPop(context) ? 0 : 16,
       toolbarHeight: 60,
       title: Row(
         children: [
-          const AppLogo(size: 32),
-          const SizedBox(width: 10),
           Expanded(
             child: TextField(
               controller: _titleCtrl,
@@ -539,8 +581,12 @@ class _HomeScreenState extends State<HomeScreen> {
           onPressed: _openHistory,
           icon: Icon(Icons.history_rounded, color: context.colors.text),
         ),
-        _ProBadgeButton(isPro: isPro, onTap: _openSettings),
-        const SizedBox(width: 12),
+        IconButton(
+          tooltip: '설정',
+          onPressed: _openSettings,
+          icon: Icon(Icons.settings_outlined, color: context.colors.text),
+        ),
+        const SizedBox(width: 4),
       ],
     );
   }
@@ -729,7 +775,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                     if (r.hasSober && per > 0)
                       Text(
-                        '술X ${Fmt.won(r.soberPerPerson(unit, mode))}',
+                        '안 마신 사람 ${Fmt.won(r.soberPerPerson(unit, mode))}',
                         style: _Txt.caption(context),
                       ),
                   ],
@@ -815,95 +861,13 @@ class _HomeScreenState extends State<HomeScreen> {
                   ],
                 ),
                 const SizedBox(height: 10),
-                // ── 술 안 마신 인원 할인 ──
-                Row(
-                  children: [
-                    Icon(Icons.local_drink_outlined,
-                        size: 18, color: context.colors.subText),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: Text(
-                        '술 안 마신 인원 ${r.discountPercent}% 할인',
-                        style: _Txt.label,
-                      ),
-                    ),
-                    Switch.adaptive(
-                      value: r.soberDiscount,
-                      activeTrackColor: AppColors.primary,
-                      onChanged: (v) {
-                        HapticFeedback.lightImpact();
-                        _update(() => r.soberDiscount = v);
-                      },
-                    ),
-                  ],
-                ),
-                AnimatedSize(
-                  duration: const Duration(milliseconds: 200),
-                  curve: Curves.easeOutCubic,
-                  alignment: Alignment.topCenter,
-                  child: !r.soberDiscount
-                      ? const SizedBox(width: double.infinity)
-                      : Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const SizedBox(height: 4),
-                            Row(
-                              children: [
-                                Text('할인율', style: _Txt.caption(context)),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: Wrap(
-                                    spacing: 6,
-                                    runSpacing: 6,
-                                    children: [
-                                      for (final p in RoundItem.discountOptions)
-                                        _SelectChip(
-                                          label: '$p%',
-                                          dense: true,
-                                          selected: r.discountPercent == p,
-                                          onTap: () {
-                                            HapticFeedback.lightImpact();
-                                            _update(
-                                                () => r.discountPercent = p);
-                                          },
-                                        ),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 10),
-                            Text(
-                              r.soberIds.isEmpty
-                                  ? '👇 술 안 마신 사람을 눌러 주세요'
-                                  : '술 안 마신 사람 ${r.soberIds.length}명은 ${r.discountPercent}% 덜 내요',
-                              style: r.soberIds.isEmpty
-                                  ? const TextStyle(
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w700,
-                                      color: AppColors.primary,
-                                    )
-                                  : _Txt.caption(context),
-                            ),
-                            const SizedBox(height: 8),
-                            Wrap(
-                              spacing: 8,
-                              runSpacing: 8,
-                              children: [
-                                for (final m in attendees)
-                                  _SelectChip(
-                                    label: '🥤 ${m.name}',
-                                    selected: r.soberIds.contains(m.id),
-                                    onTap: () => _toggleSober(r, m),
-                                  ),
-                              ],
-                            ),
-                          ],
-                        ),
-                ),
+                _buildSober(r, attendees),
+                _buildWeights(r, attendees),
                 _buildFree(r, attendees),
                 const SizedBox(height: 6),
                 _buildExtras(r, attendees),
+                const SizedBox(height: 6),
+                _buildSponsors(r),
                 const SizedBox(height: 6),
                 _buildSale(r),
               ],
@@ -956,6 +920,437 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
+  /// 술 안 마신 사람 — 술값 따로(기본) / 할인율로(간편)
+  Widget _buildSober(RoundItem r, List<Member> attendees) {
+    final split = r.soberMode == SoberMode.split;
+    final drinkers = attendees.where((m) => r.isDrinker(m.id)).length;
+    final String hint;
+    if (r.soberIds.isEmpty) {
+      hint = '술 안 마신 사람을 눌러 주세요';
+    } else if (split) {
+      hint = r.alcoholOverflow
+          ? '술값이 나눌 금액보다 커요'
+          : r.alcoholAmount <= 0
+              ? '영수증의 술값을 넣어 주세요'
+              : '술값 ${Fmt.won(r.alcoholPart)}은 마신 $drinkers명이, '
+                  '나머지 ${Fmt.won(r.sharedAmount - r.alcoholPart)}은 모두가 나눠요';
+    } else {
+      hint = '안 마신 사람 ${r.soberIds.length}명은 ${r.discountPercent}% 덜 내요';
+    }
+    final warn = r.soberIds.isEmpty ||
+        (split && (r.alcoholOverflow || r.alcoholAmount <= 0));
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(Icons.local_drink_outlined,
+                size: 18, color: context.colors.subText),
+            const SizedBox(width: 6),
+            const Expanded(child: Text('술 안 마신 사람', style: _Txt.label)),
+            Switch.adaptive(
+              value: r.soberDiscount,
+              activeTrackColor: AppColors.primary,
+              onChanged: (v) {
+                HapticFeedback.lightImpact();
+                _update(() => r.soberDiscount = v);
+              },
+            ),
+          ],
+        ),
+        AnimatedSize(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOutCubic,
+          alignment: Alignment.topCenter,
+          child: !r.soberDiscount
+              ? const SizedBox(width: double.infinity)
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const SizedBox(height: 4),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: [
+                        for (final m in SoberMode.values)
+                          _SelectChip(
+                            label: m.label,
+                            dense: true,
+                            selected: r.soberMode == m,
+                            onTap: () {
+                              HapticFeedback.lightImpact();
+                              _update(() => r.soberMode = m);
+                            },
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    if (split)
+                      TextField(
+                        controller: _alcoholCtrl(r),
+                        keyboardType: TextInputType.number,
+                        inputFormatters: [ThousandsFormatter()],
+                        onChanged: (v) => _update(() => r.alcoholAmount =
+                            int.tryParse(v.replaceAll(',', '')) ?? 0),
+                        decoration:
+                            AppDecor.boxInput(context, '영수증의 술값 (예: 48,000)')
+                                .copyWith(
+                          prefixText: '술값  ',
+                          suffixText: '원',
+                        ),
+                      )
+                    else
+                      Row(
+                        children: [
+                          Text('할인율', style: _Txt.caption(context)),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Wrap(
+                              spacing: 6,
+                              runSpacing: 6,
+                              children: [
+                                for (final p in RoundItem.discountOptions)
+                                  _SelectChip(
+                                    label: '$p%',
+                                    dense: true,
+                                    selected: r.discountPercent == p,
+                                    onTap: () {
+                                      HapticFeedback.lightImpact();
+                                      _update(() => r.discountPercent = p);
+                                    },
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    const SizedBox(height: 10),
+                    Text(
+                      hint,
+                      style: warn
+                          ? TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              color: r.alcoholOverflow
+                                  ? AppColors.danger
+                                  : AppColors.primary,
+                            )
+                          : _Txt.caption(context),
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        for (final m in attendees)
+                          _SelectChip(
+                            label: m.name,
+                            selected: r.soberIds.contains(m.id),
+                            onTap: () => _toggleSober(r, m),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                  ],
+                ),
+        ),
+      ],
+    );
+  }
+
+  /// 늦게 온 사람·먼저 간 사람 비율
+  Widget _buildWeights(RoundItem r, List<Member> attendees) {
+    final set = [
+      for (final m in attendees)
+        if (r.weights.containsKey(m.id)) m,
+    ];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(Icons.schedule_rounded,
+                size: 18, color: context.colors.subText),
+            const SizedBox(width: 6),
+            const Expanded(
+              child: Text('늦게 온·먼저 간 사람', style: _Txt.label),
+            ),
+            TextButton.icon(
+              onPressed: () => _editWeights(r),
+              style: TextButton.styleFrom(
+                foregroundColor: AppColors.primary,
+                visualDensity: VisualDensity.compact,
+              ),
+              icon: Icon(set.isEmpty ? Icons.add_rounded : Icons.edit_rounded,
+                  size: 18),
+              label: Text(
+                set.isEmpty ? '비율' : '수정',
+                style: const TextStyle(fontWeight: FontWeight.w800),
+              ),
+            ),
+          ],
+        ),
+        Text(
+          set.isEmpty
+              ? '잠깐 있다 간 사람은 0.5배처럼 덜 내게 할 수 있어요'
+              : set
+                  .map((m) => '${m.name} ${weightLabel(r.weights[m.id]!)}배')
+                  .join(' · '),
+          style: set.isEmpty
+              ? _Txt.caption(context)
+              : const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.primary,
+                ),
+        ),
+        const SizedBox(height: 6),
+      ],
+    );
+  }
+
+  Future<void> _editWeights(RoundItem r) async {
+    HapticFeedback.lightImpact();
+    FocusScope.of(context).unfocus();
+    final attendees =
+        _s.members.where((m) => r.participantIds.contains(m.id)).toList();
+    final res = await showModalBottomSheet<Map<String, double>>(
+      context: context,
+      backgroundColor: context.colors.card,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (_) => _WeightSheet(
+        members: attendees,
+        initial: {for (final m in attendees) m.id: r.weights[m.id] ?? 1.0},
+      ),
+    );
+    if (res == null || !mounted) return;
+    _update(() {
+      res.forEach(r.setWeight);
+    });
+  }
+
+  String _sponsorName(String id) =>
+      id == kExternalSponsor ? '회사·외부 지원' : _s.memberById(id).name;
+
+  /// 이 차수 찬조·지원 (나눌 금액에서 먼저 빼요)
+  Widget _buildSponsors(RoundItem r) {
+    final ids = r.sponsors.keys.toList();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(Icons.volunteer_activism_outlined,
+                size: 18, color: context.colors.subText),
+            const SizedBox(width: 6),
+            const Expanded(child: Text('찬조·지원', style: _Txt.label)),
+            TextButton.icon(
+              onPressed: () => _editSponsor(r.sponsors, (id, v) {
+                _update(() => r.setSponsor(id, v));
+              }),
+              style: TextButton.styleFrom(
+                foregroundColor: AppColors.primary,
+                visualDensity: VisualDensity.compact,
+              ),
+              icon: const Icon(Icons.add_rounded, size: 18),
+              label: const Text(
+                '추가',
+                style: TextStyle(fontWeight: FontWeight.w800),
+              ),
+            ),
+          ],
+        ),
+        if (ids.isEmpty)
+          Text(
+            '"2차는 선배가 5만 원 보탬"처럼 이 차수에만 낸 돈을 먼저 빼요',
+            style: _Txt.caption(context),
+          )
+        else ...[
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final id in ids)
+                _PillButton(
+                  label: '${_sponsorName(id)} ${Fmt.won(r.sponsors[id]!)}',
+                  icon: Icons.edit_rounded,
+                  onTap: () => _editSponsor(
+                    r.sponsors,
+                    (id, v) => _update(() => r.setSponsor(id, v)),
+                    editId: id,
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            r.sponsorsOverflow
+                ? '찬조 합계가 나눌 금액보다 커서 비율대로 줄여 계산해요'
+                : '찬조 ${Fmt.won(r.sponsorTotal)}을 빼고 나눠요',
+            style: r.sponsorsOverflow
+                ? const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.danger,
+                  )
+                : _Txt.caption(context),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Future<void> _editSponsor(
+    Map<String, int> current,
+    void Function(String id, int value) apply, {
+    String? editId,
+  }) async {
+    HapticFeedback.lightImpact();
+    FocusScope.of(context).unfocus();
+    final res = await showDialog<_ExtraResult>(
+      context: context,
+      builder: (_) => _ExtraDialog(
+        members: _s.members,
+        initialMemberId: editId,
+        initialAmount: editId == null ? 0 : current[editId] ?? 0,
+        title: '찬조·지원',
+        editTitle: '찬조·지원 수정',
+        question: '누가 냈나요?',
+        allowExternal: true,
+      ),
+    );
+    if (res == null || !mounted) return;
+    apply(res.memberId, res.amount);
+  }
+
+  /// 정산 전체 찬조·지원 + 모임 적립금
+  Widget _buildSettlementExtrasCard() {
+    final ids = _s.sponsors.keys.toList();
+    final group = _s.groupName;
+    final fund =
+        group.isEmpty ? 0 : AppStorage.groupFund(group, excludeId: _s.id);
+
+    return Container(
+      decoration: AppDecor.card(context),
+      padding: const EdgeInsets.fromLTRB(16, 16, 8, 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Expanded(
+                child: Text('전체 찬조·지원', style: _Txt.cardTitle),
+              ),
+              TextButton.icon(
+                onPressed: () => _editSponsor(
+                  _s.sponsors,
+                  (id, v) => _update(() => _s.setSponsor(id, v)),
+                ),
+                style: TextButton.styleFrom(
+                  foregroundColor: AppColors.primary,
+                  visualDensity: VisualDensity.compact,
+                ),
+                icon: const Icon(Icons.add_rounded, size: 18),
+                label: const Text(
+                  '추가',
+                  style: TextStyle(fontWeight: FontWeight.w800),
+                ),
+              ),
+            ],
+          ),
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: Text(
+              ids.isEmpty
+                  ? '"부장님 10만 원", "회사 지원금"처럼 전체에 보탠 돈은 모두의 몫에서 같은 비율로 빠져요'
+                  : '찬조한 사람은 찬조금 + 자기 몫을 내요',
+              style: _Txt.caption(context),
+            ),
+          ),
+          if (ids.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final id in ids)
+                  _PillButton(
+                    label: '${_sponsorName(id)} ${Fmt.won(_s.sponsors[id]!)}',
+                    icon: Icons.edit_rounded,
+                    onTap: () => _editSponsor(
+                      _s.sponsors,
+                      (id, v) => _update(() => _s.setSponsor(id, v)),
+                      editId: id,
+                    ),
+                  ),
+              ],
+            ),
+          ],
+          const Padding(
+            padding: EdgeInsets.fromLTRB(0, 14, 8, 10),
+            child: Divider(),
+          ),
+          if (group.isEmpty)
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: Row(
+                children: [
+                  Icon(Icons.savings_outlined,
+                      size: 18, color: context.colors.subText),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      '모임 그룹에 연결하면 남은 자투리를 다음 정산에서 쓸 수 있어요',
+                      style: _Txt.caption(context),
+                    ),
+                  ),
+                ],
+              ),
+            )
+          else
+            Row(
+              children: [
+                const Icon(Icons.savings_outlined,
+                    size: 18, color: AppColors.primary),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '"$group" 적립금 ${Fmt.won(fund)}',
+                        style: _Txt.label,
+                      ),
+                      Text(
+                        fund > 0
+                            ? '켜면 이번 정산에서 먼저 빼요'
+                            : fund < 0
+                                ? '지난 정산에서 총무가 ${Fmt.won(-fund)} 모자랐어요'
+                                : '정산이 끝나면 남은 자투리가 여기 쌓여요',
+                        style: _Txt.caption(context),
+                      ),
+                    ],
+                  ),
+                ),
+                Switch.adaptive(
+                  value: _s.carryIn > 0,
+                  activeTrackColor: AppColors.primary,
+                  onChanged: fund <= 0 && _s.carryIn == 0
+                      ? null
+                      : (v) {
+                          HapticFeedback.lightImpact();
+                          _update(() => _s.carryIn = v ? fund : 0);
+                        },
+                ),
+              ],
+            ),
+        ],
+      ),
+    );
+  }
+
   /// 면제 인원 (생일자 등 — 나머지가 나눠 냄)
   Widget _buildFree(RoundItem r, List<Member> attendees) {
     return Column(
@@ -994,7 +1389,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     const SizedBox(height: 4),
                     Text(
                       r.freeIds.isEmpty
-                          ? '👇 이번 차수에 안 내는 사람을 눌러 주세요'
+                          ? '이번 차수에 안 내는 사람을 눌러 주세요'
                           : '면제 ${r.freeIds.length}명 몫은 나머지 ${r.payingCount}명이 나눠 내요',
                       style: r.freeIds.isEmpty
                           ? const TextStyle(
@@ -1011,7 +1406,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       children: [
                         for (final m in attendees)
                           _SelectChip(
-                            label: '🎂 ${m.name}',
+                            label: m.name,
                             selected: r.freeIds.contains(m.id),
                             onTap: () => _toggleFree(r, m),
                           ),
@@ -1140,7 +1535,7 @@ class _HomeScreenState extends State<HomeScreen> {
           const SizedBox(height: 6),
           Text(
             r.extrasOverflow
-                ? '⚠️ 추가 금액 합계가 결제 금액보다 커요'
+                ? '추가 금액 합계가 결제 금액보다 커요'
                 : '추가 ${Fmt.won(r.extrasTotal)}을 뺀 ${Fmt.won(r.sharedAmount)}을 나눠요',
             style: r.extrasOverflow
                 ? const TextStyle(
@@ -1346,6 +1741,56 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
           ],
+          if (_s.groupName.isNotEmpty) _buildGroupRuleRow(),
+        ],
+      ),
+    );
+  }
+
+  /// 연결된 모임 그룹의 기본 자투리 규칙으로 저장
+  Widget _buildGroupRuleRow() {
+    final group =
+        AppStorage.groups.where((g) => g.name == _s.groupName).firstOrNull;
+    if (group == null) return const SizedBox.shrink();
+    final same =
+        group.roundUnit == _s.roundUnit && group.roundMode == _s.roundMode;
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              same
+                  ? '"${group.name}" 모임의 기본 규칙이에요'
+                  : group.hasRule
+                      ? '"${group.name}" 기본 규칙: ${group.ruleLabel}'
+                      : '"${group.name}" 모임에 이 규칙을 기본으로 둘 수 있어요',
+              style: _Txt.caption(context),
+            ),
+          ),
+          if (!same)
+            TextButton(
+              onPressed: () async {
+                HapticFeedback.lightImpact();
+                await AppStorage.saveGroup(MemberGroup(
+                  name: group.name,
+                  names: group.names,
+                  roundUnit: _s.roundUnit,
+                  roundMode: _s.roundMode,
+                ));
+                if (!mounted) return;
+                setState(() {});
+                _toast('"${group.name}" 모임은 이제 ${_s.roundingLabel}로 시작해요');
+              },
+              style: TextButton.styleFrom(
+                foregroundColor: AppColors.primary,
+                visualDensity: VisualDensity.compact,
+              ),
+              child: const Text(
+                '기본으로 저장',
+                style: TextStyle(fontWeight: FontWeight.w800),
+              ),
+            ),
         ],
       ),
     );
@@ -1437,7 +1882,8 @@ class ThousandsFormatter extends TextInputFormatter {
 
 class _Txt {
   // 글자색을 지정하지 않으면 테마의 기본 글자색(라이트/다크 자동)이 적용됩니다.
-  static const cardTitle = TextStyle(fontSize: 15, fontWeight: FontWeight.w800);
+  static const cardTitle =
+      TextStyle(fontSize: 17, fontWeight: FontWeight.w800, letterSpacing: -0.3);
   static const label = TextStyle(fontSize: 14, fontWeight: FontWeight.w600);
 
   static TextStyle caption(BuildContext context) => TextStyle(
@@ -1523,20 +1969,20 @@ class _TipCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
+      padding: const EdgeInsets.fromLTRB(18, 16, 10, 8),
       decoration: BoxDecoration(
-        color: context.colors.inverse,
+        color: context.colors.primaryLight,
         borderRadius: BorderRadius.circular(AppDecor.radius),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            '👋 예시 회식으로 채워 두었어요',
+          Text(
+            '예시 회식으로 채워 두었어요',
             style: TextStyle(
-              fontSize: 15,
+              fontSize: 16,
               fontWeight: FontWeight.w800,
-              color: Colors.white,
+              color: context.colors.text,
             ),
           ),
           const SizedBox(height: 4),
@@ -1545,7 +1991,7 @@ class _TipCard extends StatelessWidget {
             style: TextStyle(
               fontSize: 13,
               height: 1.4,
-              color: Colors.white.withValues(alpha: 0.75),
+              color: context.colors.subText,
             ),
           ),
           const SizedBox(height: 4),
@@ -1555,7 +2001,7 @@ class _TipCard extends StatelessWidget {
               TextButton(
                 onPressed: onStartBlank,
                 style: TextButton.styleFrom(
-                  foregroundColor: Colors.white.withValues(alpha: 0.75),
+                  foregroundColor: context.colors.subText,
                 ),
                 child: const Text('비우고 새로 시작'),
               ),
@@ -1575,7 +2021,7 @@ class _TipCard extends StatelessWidget {
   }
 }
 
-/// 상단 고정 요약 배너 (퍼스널 컬러 테두리)
+/// 상단 고정 요약 (총 지출 + 참여 인원)
 class _SummaryBanner extends StatelessWidget {
   const _SummaryBanner({required this.total, required this.people});
 
@@ -1586,20 +2032,15 @@ class _SummaryBanner extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 4, 16, 12),
-      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-      decoration: BoxDecoration(
-        color: context.colors.card,
-        borderRadius: BorderRadius.circular(AppDecor.radius),
-        border: Border.all(color: AppColors.primary, width: 1.5),
-        boxShadow: AppDecor.shadow(context),
-      ),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+      decoration: AppDecor.card(context),
       child: Row(
         children: [
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('총 지출 합계', style: _Txt.caption(context)),
+                Text('총 지출', style: _Txt.caption(context)),
                 const SizedBox(height: 2),
                 FittedBox(
                   fit: BoxFit.scaleDown,
@@ -1607,8 +2048,9 @@ class _SummaryBanner extends StatelessWidget {
                   child: _AnimatedWon(
                     total,
                     style: TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.w900,
+                      fontSize: 26,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -0.6,
                       color: context.colors.text,
                     ),
                   ),
@@ -1616,26 +2058,21 @@ class _SummaryBanner extends StatelessWidget {
               ],
             ),
           ),
+          const SizedBox(width: 12),
           Container(
-            width: 1,
-            height: 36,
-            margin: const EdgeInsets.symmetric(horizontal: 16),
-            color: context.colors.border,
-          ),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('총 참여 인원', style: _Txt.caption(context)),
-              const SizedBox(height: 2),
-              Text(
-                '$people명',
-                style: const TextStyle(
-                  fontSize: 22,
-                  fontWeight: FontWeight.w900,
-                  color: AppColors.primary,
-                ),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+            decoration: BoxDecoration(
+              color: context.colors.primaryLight,
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Text(
+              '$people명 참여',
+              style: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w800,
+                color: AppColors.primary,
               ),
-            ],
+            ),
           ),
         ],
       ),
@@ -1943,51 +2380,6 @@ class _DashedRRectPainter extends CustomPainter {
 }
 
 /// 앱바 우측: 설정 + PRO 뱃지
-class _ProBadgeButton extends StatelessWidget {
-  const _ProBadgeButton({required this.isPro, required this.onTap});
-
-  final bool isPro;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: context.colors.card,
-      borderRadius: BorderRadius.circular(20),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(20),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(8, 6, 6, 6),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.settings_rounded,
-                  size: 20, color: context.colors.text),
-              const SizedBox(width: 6),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(
-                  color: isPro ? AppColors.primary : context.colors.inverse,
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Text(
-                  isPro ? 'PRO ✓' : 'PRO',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 /// 키보드 바로 위 [완료] 바
 class _KeyboardDoneBar extends StatelessWidget {
   const _KeyboardDoneBar();
@@ -2032,13 +2424,7 @@ class _BottomBar extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         color: context.colors.card,
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.06),
-            blurRadius: 12,
-            offset: const Offset(0, -2),
-          ),
-        ],
+        border: Border(top: BorderSide(color: context.colors.border)),
       ),
       child: SafeArea(
         top: false,
@@ -2254,11 +2640,21 @@ class _ExtraDialog extends StatefulWidget {
     required this.members,
     this.initialMemberId,
     this.initialAmount = 0,
+    this.title = '개별 추가 금액',
+    this.editTitle = '추가 금액 수정',
+    this.question = '누가 따로 시켰나요?',
+    this.allowExternal = false,
   });
 
   final List<Member> members;
   final String? initialMemberId;
   final int initialAmount;
+  final String title;
+  final String editTitle;
+  final String question;
+
+  /// '회사·외부 지원' 선택지 표시 (찬조·지원용)
+  final bool allowExternal;
 
   @override
   State<_ExtraDialog> createState() => _ExtraDialogState();
@@ -2293,7 +2689,7 @@ class _ExtraDialogState extends State<_ExtraDialog> {
       surfaceTintColor: Colors.transparent,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
       title: Text(
-        _editing ? '추가 금액 수정' : '개별 추가 금액',
+        _editing ? widget.editTitle : widget.title,
         style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
       ),
       content: SingleChildScrollView(
@@ -2301,20 +2697,22 @@ class _ExtraDialogState extends State<_ExtraDialog> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('누가 따로 시켰나요?', style: _Txt.caption(context)),
+            Text(widget.question, style: _Txt.caption(context)),
             const SizedBox(height: 8),
             Wrap(
               spacing: 6,
               runSpacing: 6,
               children: [
-                for (final m in widget.members)
+                for (final (id, name) in [
+                  for (final m in widget.members) (m.id, m.name),
+                  if (widget.allowExternal) (kExternalSponsor, '회사·외부 지원'),
+                ])
                   _SelectChip(
-                    label: m.name,
+                    label: name,
                     dense: true,
-                    selected: _memberId == m.id,
-                    onTap: _editing
-                        ? () {}
-                        : () => setState(() => _memberId = m.id),
+                    selected: _memberId == id,
+                    onTap:
+                        _editing ? () {} : () => setState(() => _memberId = id),
                   ),
               ],
             ),
@@ -2352,6 +2750,88 @@ class _ExtraDialogState extends State<_ExtraDialog> {
           ),
         ),
       ],
+    );
+  }
+}
+
+// ── 늦게 온·먼저 간 사람 비율 ──
+
+class _WeightSheet extends StatefulWidget {
+  const _WeightSheet({required this.members, required this.initial});
+
+  final List<Member> members;
+  final Map<String, double> initial;
+
+  @override
+  State<_WeightSheet> createState() => _WeightSheetState();
+}
+
+class _WeightSheetState extends State<_WeightSheet> {
+  late final Map<String, double> _w = {...widget.initial};
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Text('이 차수, 얼마나 있었나요?', style: _Txt.cardTitle),
+            const SizedBox(height: 4),
+            Text(
+              '1배가 기본이에요. 잠깐 있다 간 사람은 0.5배, 더 많이 먹은 사람은 1.5배처럼 정해요.',
+              style: _Txt.caption(context),
+            ),
+            const SizedBox(height: 14),
+            Flexible(
+              child: ListView(
+                shrinkWrap: true,
+                children: [
+                  for (final m in widget.members)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              m.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: _Txt.label,
+                            ),
+                          ),
+                          for (final w in kWeightOptions)
+                            Padding(
+                              padding: const EdgeInsets.only(left: 6),
+                              child: _SelectChip(
+                                label: '${weightLabel(w)}배',
+                                dense: true,
+                                selected: (_w[m.id] ?? 1.0) == w,
+                                onTap: () {
+                                  HapticFeedback.selectionClick();
+                                  setState(() => _w[m.id] = w);
+                                },
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 6),
+            SizedBox(
+              height: 52,
+              child: ElevatedButton(
+                onPressed: () => Navigator.of(context).pop(_w),
+                child: const Text('적용하기'),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

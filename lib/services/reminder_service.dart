@@ -100,7 +100,7 @@ class ReminderService {
         scheduledDate: tz.TZDateTime.from(at, tz.UTC),
         notificationDetails: _details,
         androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
-        title: '💸 [$title] 입금 확인할 시간이에요',
+        title: '[$title] 입금 확인할 시간이에요',
         body: '아직 $unpaid명이 입금 전이에요. 독촉 메시지를 보내 볼까요?',
       );
       return true;

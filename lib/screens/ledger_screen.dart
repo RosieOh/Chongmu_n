@@ -13,7 +13,7 @@ String ledgerReminderText(
   List<String> payLinks = const [],
 }) {
   final b = StringBuffer()
-    ..writeln('📢 ${e.name}님, 아직 입금 확인이 안 된 정산이 있어요 🙏')
+    ..writeln('${e.name}님, 아직 입금 확인이 안 된 정산이 있어요')
     ..writeln();
   for (final item in e.items) {
     final s = item.settlement;
@@ -28,13 +28,13 @@ String ledgerReminderText(
   if (toTreasurer && account.isNotEmpty) {
     b
       ..writeln()
-      ..writeln('🏦 입금 계좌')
+      ..writeln('입금 계좌')
       ..writeln(account);
   }
   if (toTreasurer && payLinks.isNotEmpty) {
     b
       ..writeln()
-      ..writeln('👉 눌러서 바로 송금');
+      ..writeln('눌러서 바로 송금');
     payLinks.forEach(b.writeln);
   }
   return b.toString().trimRight();
@@ -44,10 +44,13 @@ String ledgerReminderText(
 ///
 /// 정산을 누르면 [HistoryPick] 을 돌려줘요. 바뀐 게 있으면 지난 정산 화면이 다시 읽어요.
 class LedgerScreen extends StatefulWidget {
-  const LedgerScreen({super.key, required this.currentId});
+  const LedgerScreen({super.key, required this.currentId, this.onPick});
 
   /// 지금 메인 화면에서 편집 중인 정산 ID (여기서는 입금 처리하지 않음)
   final String currentId;
+
+  /// 하단 탭 안에 들어갈 때: 화면을 닫는 대신 이 콜백으로 알려요
+  final ValueChanged<HistoryPick>? onPick;
 
   @override
   State<LedgerScreen> createState() => _LedgerScreenState();
@@ -114,7 +117,13 @@ class _LedgerScreenState extends State<LedgerScreen> {
 
   void _open(LedgerItem item) {
     HapticFeedback.lightImpact();
-    Navigator.of(context).pop(HistoryPick(item.settlement.id));
+    final pick = HistoryPick(item.settlement.id);
+    final onPick = widget.onPick;
+    if (onPick != null) {
+      onPick(pick);
+    } else {
+      Navigator.of(context).pop(pick);
+    }
   }
 
   @override

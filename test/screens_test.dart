@@ -2,8 +2,10 @@ import 'package:chongmu_n/models/round_item.dart';
 import 'package:chongmu_n/screens/history_screen.dart';
 import 'package:chongmu_n/screens/home_screen.dart';
 import 'package:chongmu_n/screens/ledger_screen.dart';
+import 'package:chongmu_n/screens/main_screen.dart';
 import 'package:chongmu_n/screens/receipt_screen.dart';
 import 'package:chongmu_n/screens/settings_screen.dart';
+import 'package:chongmu_n/screens/splash_screen.dart';
 import 'package:chongmu_n/theme/app_theme.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
@@ -34,6 +36,18 @@ void main() {
     ));
     await tester.pumpAndSettle();
   }
+
+  Future<void> pumpScreenNoSettle(WidgetTester tester, Widget screen) async {
+    tester.view.physicalSize = const Size(390 * 3, 844 * 3);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(MaterialApp(theme: AppTheme.light, home: screen));
+    await tester.pump();
+  }
+
+  /// 홈 화면의 세로 스크롤 (배너 PageView 와 구분)
+  final vertical = find.byWidgetPredicate(
+      (w) => w is Scrollable && w.axisDirection == AxisDirection.down);
 
   for (final mode in [ThemeMode.light, ThemeMode.dark]) {
     group('${mode.name} 모드', () {
@@ -67,10 +81,56 @@ void main() {
         s.roundMode = RoundMode.nearest;
         await AppStorage.saveSettlement(s);
         await pumpScreen(tester, const HomeScreen(), mode);
-        expect(find.text('술 안 마신 인원 30% 할인'), findsOneWidget);
+        expect(find.text('안 마신 사람 1명은 30% 덜 내요'), findsOneWidget);
         expect(find.text('민수 +12,000원'), findsOneWidget);
         expect(find.text('면제 인원 (생일자 등)'), findsNWidgets(2));
         expect(find.text('반올림'), findsOneWidget);
+      });
+
+      testWidgets('정산 입력 (술값 따로 · 비율 · 찬조 · 적립금)', (tester) async {
+        final old = Settlement.sample()
+          ..isSample = false
+          ..groupName = '동기'
+          ..roundUnit = 1000;
+        await AppStorage.saveSettlement(old); // 적립금 2,000원
+        final s = Settlement.sample()
+          ..isSample = false
+          ..groupName = '동기';
+        final r = s.rounds.first
+          ..soberDiscount = true
+          ..soberMode = SoberMode.split
+          ..alcoholAmount = 40000;
+        r.soberIds.add(s.members[3].id);
+        r.setWeight(s.members[2].id, 0.5);
+        r.setSponsor(kExternalSponsor, 10000);
+        s.setSponsor(s.members[1].id, 20000);
+        await AppStorage.saveSettlement(s);
+        await pumpScreen(tester, const HomeScreen(), mode);
+
+        expect(find.text('술값 따로'), findsWidgets);
+        expect(find.textContaining('술값 40,000원은 마신 3명이'), findsOneWidget);
+        expect(find.text('지영 0.5배'), findsOneWidget);
+        expect(find.text('회사·외부 지원 10,000원'), findsOneWidget);
+        expect(find.text('민수 20,000원'), findsOneWidget);
+        expect(find.text('"동기" 적립금 2,000원'), findsOneWidget);
+
+        await tester.ensureVisible(find.text('"동기" 적립금 2,000원'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byType(Switch).last);
+        await tester.pumpAndSettle();
+        expect(AppStorage.loadSettlement().carryIn, 2000);
+      });
+
+      testWidgets('영수증 산식 + 카카오페이 옮겨 적기', (tester) async {
+        final s = Settlement.sample()..isSample = false;
+        s.setSponsor(s.members[1].id, 46000);
+        await pumpScreen(tester, ReceiptScreen(settlement: s), mode);
+        expect(find.text('1차 30,000 − 지원·적립 7,500 = 22,500'), findsOneWidget);
+        await tester.ensureVisible(find.text('카카오페이로 정산 요청하기'));
+        await tester.tap(find.text('카카오페이로 정산 요청하기'));
+        await tester.pumpAndSettle();
+        expect(find.text('카카오페이에 옮겨 적기'), findsOneWidget);
+        expect(find.text('요청 메시지 (25자까지)'), findsOneWidget);
       });
 
       testWidgets('영수증 화면 (송금 정리)', (tester) async {
@@ -96,6 +156,8 @@ void main() {
             find.text('10% 할인 + 쿠폰 8,000원 → 실제 결제 100,000원'), findsOneWidget);
         expect(find.text('164,000원'), findsOneWidget); // 할인 후 총액
 
+        await tester.ensureVisible(find.text('계산기').first);
+        await tester.pumpAndSettle();
         await tester.tap(find.text('계산기').first);
         await tester.pumpAndSettle();
         expect(find.text('금액 계산기'), findsOneWidget);
@@ -154,6 +216,76 @@ void main() {
         expect(AppStorage.historyById(s.id)!.isPaid(s.members[1].id), isTrue);
       });
 
+      testWidgets('홈 화면 (첫 실행 / 기록 있음)', (tester) async {
+        final now = DateTime(2026, 11, 28, 20);
+        await pumpScreen(tester, MainScreen(now: now), mode);
+        expect(find.text('새 정산'), findsOneWidget);
+        expect(find.text('예시 정산\n둘러보기'), findsOneWidget);
+        expect(find.text('계좌 등록'), findsOneWidget);
+        expect(find.text('필수'), findsOneWidget);
+        await tester.scrollUntilVisible(find.text('금액을 입력한 정산은 여기에 모여요'), 200, scrollable: vertical);
+
+        final s = Settlement.sample()..isSample = false;
+        s.title = '불금 팀 회식';
+        await AppStorage.saveSettlement(s);
+        await pumpScreen(tester, MainScreen(now: s.createdAt), mode);
+        expect(find.textContaining('불금 팀 회식\n'), findsOneWidget);
+        await tester.scrollUntilVisible(find.text('작성 중'), 200, scrollable: vertical);
+        expect(find.text('전체보기'), findsOneWidget);
+        expect(find.textContaining('아직 못 받은 돈'), findsOneWidget);
+      });
+
+      testWidgets('홈 화면 하단 탭 이동', (tester) async {
+        await pumpScreen(tester, const MainScreen(), mode);
+        await tester.tap(find.text('기록'));
+        await tester.pumpAndSettle();
+        expect(find.byType(HistoryScreen), findsOneWidget);
+        await tester.tap(find.text('장부'));
+        await tester.pumpAndSettle();
+        expect(find.byType(LedgerScreen), findsOneWidget);
+        await tester.tap(find.text('설정').last);
+        await tester.pumpAndSettle();
+        expect(find.byType(SettingsScreen), findsOneWidget);
+        await tester.tap(find.text('홈'));
+        await tester.pumpAndSettle();
+        expect(find.text('새 정산'), findsOneWidget);
+      });
+
+      testWidgets('홈 화면 → 새 정산 → 뒤로 가면 갱신', (tester) async {
+        final s = Settlement.sample()..isSample = false;
+        s.title = '지난 회식';
+        await AppStorage.saveSettlement(s);
+        await pumpScreen(tester, const MainScreen(), mode);
+        await tester.tap(find.text('새 정산'));
+        await tester.pumpAndSettle();
+        expect(find.byType(HomeScreen), findsOneWidget);
+        expect(AppStorage.loadSettlement().id, isNot(s.id));
+
+        await tester.pageBack();
+        await tester.pumpAndSettle();
+        expect(find.byType(MainScreen), findsOneWidget);
+        expect(find.text('쓰던 정산\n마저 하기'), findsOneWidget);
+        await tester.scrollUntilVisible(find.text('지난 회식'), 200, scrollable: vertical);
+        expect(find.text('지난 회식'), findsOneWidget); // 최근 정산에만 남음
+      });
+
+      testWidgets('기록 탭에서 고르면 그 정산을 열어요', (tester) async {
+        final old = Settlement.blank()..title = '주말 등산';
+        old.rounds.first.amount = 80000;
+        await AppStorage.saveSettlement(old);
+        final cur = Settlement.blank()..title = '오늘 회식';
+        cur.rounds.first.amount = 50000;
+        await AppStorage.saveSettlement(cur);
+
+        await pumpScreen(tester, const MainScreen(), mode);
+        await tester.tap(find.text('기록'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('주말 등산'));
+        await tester.pumpAndSettle();
+        expect(find.byType(HomeScreen), findsOneWidget);
+        expect(AppStorage.loadSettlement().id, old.id);
+      });
+
       testWidgets('설정 화면 (화면 모드 선택)', (tester) async {
         await pumpScreen(tester, const SettingsScreen(), mode);
         expect(find.text('화면 모드'), findsOneWidget);
@@ -186,5 +318,14 @@ void main() {
     await tester.pumpAndSettle();
     expect(ThemeModeController.instance.mode.value, ThemeMode.dark);
     expect(AppStorage.themeMode, 'dark');
+  });
+
+  testWidgets('스플래시 → 홈 화면으로 넘어감', (tester) async {
+    await pumpScreenNoSettle(tester, const SplashScreen());
+    expect(find.text('1/N이 안 맞는 회식도, 정산은 1분'), findsOneWidget);
+    await tester.pump(const Duration(milliseconds: 1700));
+    await tester.pumpAndSettle();
+    expect(find.byType(MainScreen), findsOneWidget);
+    expect(find.byType(SplashScreen), findsNothing);
   });
 }
